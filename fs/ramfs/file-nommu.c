@@ -18,9 +18,9 @@
 #include <linux/string.h>
 #include <linux/backing-dev.h>
 #include <linux/ramfs.h>
-#include <linux/quotaops.h>
 #include <linux/pagevec.h>
 #include <linux/mman.h>
+#include <linux/sched.h>
 
 #include <asm/uaccess.h>
 #include "internal.h"
@@ -69,14 +69,11 @@ int ramfs_nommu_expand_for_mapping(struct inode *inode, size_t newsize)
 	/* make various checks */
 	order = get_order(newsize);
 	if (unlikely(order >= MAX_ORDER))
-		goto too_big;
+		return -EFBIG;
 
-	limit = current->signal->rlim[RLIMIT_FSIZE].rlim_cur;
-	if (limit != RLIM_INFINITY && newsize > limit)
-		goto fsize_exceeded;
-
-	if (newsize > inode->i_sb->s_maxbytes)
-		goto too_big;
+	ret = inode_newsize_ok(inode, newsize);
+	if (ret)
+		return ret;
 
 	i_size_write(inode, newsize);
 
@@ -118,12 +115,7 @@ int ramfs_nommu_expand_for_mapping(struct inode *inode, size_t newsize)
 
 	return 0;
 
- fsize_exceeded:
-	send_sig(SIGXFSZ, current, 0);
- too_big:
-	return -EFBIG;
-
- add_error:
+add_error:
 	while (loop < npages)
 		__free_page(pages + loop++);
 	return ret;
@@ -197,11 +189,6 @@ static int ramfs_nommu_setattr(struct dentry *dentry, struct iattr *ia)
 	ret = inode_change_ok(inode, ia);
 	if (ret)
 		return ret;
-
-	/* by providing our own setattr() method, we skip this quotaism */
-	if ((old_ia_valid & ATTR_UID && ia->ia_uid != inode->i_uid) ||
-	    (old_ia_valid & ATTR_GID && ia->ia_gid != inode->i_gid))
-		ret = DQUOT_TRANSFER(inode, ia) ? -EDQUOT : 0;
 
 	/* pick out size-changing events */
 	if (ia->ia_valid & ATTR_SIZE) {

@@ -11,8 +11,6 @@ struct elan_i2c_platform_data {
 	int abs_y_max;
 	int intr_gpio;
 	int (*power)(int on);
-	uint32_t display_width;
-	uint32_t display_height;
 };
 
 #endif

@@ -19,6 +19,7 @@
 #include <linux/miscdevice.h>
 #include <linux/platform_device.h>
 #include <linux/rtc.h>
+#include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/sysdev.h>
 #include <linux/wakelock.h>
@@ -578,12 +579,6 @@ static void  __exit alarm_exit(void)
 	wake_lock_destroy(&alarm_rtc_wake_lock);
 	platform_driver_unregister(&alarm_driver);
 }
-
-//Export symbol for Broadcomm Wifi module.
-EXPORT_SYMBOL(alarm_init);
-EXPORT_SYMBOL(alarm_cancel);
-EXPORT_SYMBOL(alarm_get_elapsed_realtime);
-EXPORT_SYMBOL(alarm_start_range);
 
 late_initcall(alarm_late_init);
 module_init(alarm_driver_init);

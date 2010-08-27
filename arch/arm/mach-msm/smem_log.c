@@ -119,8 +119,13 @@ struct smem_log_item {
 #define SMEM_POWER_LOG_EVENTS_SIZE (sizeof(struct smem_log_item) * \
 			      SMEM_LOG_NUM_POWER_ENTRIES)
 
+#if defined(CONFIG_ARCH_MSM7X30)
+#define SMEM_SPINLOCK_SMEM_LOG "S:2"
+#define SMEM_SPINLOCK_STATIC_LOG "S:5"
+#else
 #define SMEM_SPINLOCK_SMEM_LOG 2
 #define SMEM_SPINLOCK_STATIC_LOG 5
+#endif
 /* POWER shares with SMEM_SPINLOCK_SMEM_LOG */
 
 static remote_spinlock_t remote_spinlock;
@@ -1126,8 +1131,8 @@ static int _smem_log_init(void)
 	inst[GEN].idx = (uint32_t *)smem_alloc(SMEM_SMEM_LOG_IDX,
 					     sizeof(uint32_t));
 	if (!inst[GEN].events || !inst[GEN].idx) {
-		printk(KERN_ERR "smem_log_init: no log or log_idx allocated, "
-		       "smem_log disabled");
+		pr_err("%s: no log or log_idx allocated, "
+		       "smem_log disabled\n", __func__);
 	}
 	inst[GEN].num = SMEM_LOG_NUM_ENTRIES;
 	inst[GEN].remote_spinlock = &remote_spinlock;
@@ -1140,8 +1145,8 @@ static int _smem_log_init(void)
 	inst[STA].idx = (uint32_t *)smem_alloc(SMEM_SMEM_STATIC_LOG_IDX,
 						     sizeof(uint32_t));
 	if (!inst[STA].events || !inst[STA].idx) {
-		printk(KERN_ERR "smem_log_init: no static log or log_idx "
-		       "allocated, smem_log disabled");
+		pr_err("%s: no static log or log_idx "
+		       "allocated, smem_log disabled\n", __func__);
 	}
 	inst[STA].num = SMEM_LOG_NUM_STATIC_ENTRIES;
 	inst[STA].remote_spinlock = &remote_spinlock_static;
@@ -1160,8 +1165,8 @@ static int _smem_log_init(void)
 	inst[POW].idx = NULL;
 #endif
 	if (!inst[POW].events || !inst[POW].idx) {
-		printk(KERN_ERR "smem_log_init: no power log or log_idx "
-		       "allocated, smem_log disabled");
+		pr_err("%s: no power log or log_idx "
+		       "allocated, smem_log disabled\n", __func__);
 	}
 	inst[POW].num = SMEM_LOG_NUM_POWER_ENTRIES;
 	inst[POW].remote_spinlock = &remote_spinlock;

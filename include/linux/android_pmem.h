@@ -30,6 +30,20 @@
 #define PMEM_KERNEL_TEST_LARGE_REGION_NUMBER_TEST_IOCTL \
 	_IO(PMEM_KERNEL_TEST_MAGIC, 5)
 
+#include <linux/fs.h>
+
+#define PMEM_KERNEL_TEST_MAGIC 0xc0
+#define PMEM_KERNEL_TEST_NOMINAL_TEST_IOCTL \
+	_IO(PMEM_KERNEL_TEST_MAGIC, 1)
+#define PMEM_KERNEL_TEST_ADVERSARIAL_TEST_IOCTL \
+	_IO(PMEM_KERNEL_TEST_MAGIC, 2)
+#define PMEM_KERNEL_TEST_HUGE_ALLOCATION_TEST_IOCTL \
+	_IO(PMEM_KERNEL_TEST_MAGIC, 3)
+#define PMEM_KERNEL_TEST_FREE_UNALLOCATED_TEST_IOCTL \
+	_IO(PMEM_KERNEL_TEST_MAGIC, 4)
+#define PMEM_KERNEL_TEST_LARGE_REGION_NUMBER_TEST_IOCTL \
+	_IO(PMEM_KERNEL_TEST_MAGIC, 5)
+
 #define PMEM_IOCTL_MAGIC 'p'
 #define PMEM_GET_PHYS		_IOW(PMEM_IOCTL_MAGIC, 1, unsigned int)
 #define PMEM_MAP		_IOW(PMEM_IOCTL_MAGIC, 2, unsigned int)
@@ -126,6 +140,8 @@ struct android_pmem_platform_data
 	unsigned cached;
 	/* The MSM7k has bits to enable a write buffer in the bus controller*/
 	unsigned buffered;
+	/* This PMEM is on memory that may be powered off */
+	unsigned unstable;
 };
 
 /* flags in the following function defined as above. */
@@ -135,33 +151,34 @@ int32_t pmem_kfree(const int32_t physaddr);
 #ifdef CONFIG_ANDROID_PMEM
 int is_pmem_file(struct file *file);
 int get_pmem_file(unsigned int fd, unsigned long *start, unsigned long *vstart,
-                 unsigned long *end, struct file **filp);
+		  unsigned long *end, struct file **filp);
 int get_pmem_user_addr(struct file *file, unsigned long *start,
-                      unsigned long *end);
+		       unsigned long *end);
 void put_pmem_file(struct file* file);
 void flush_pmem_file(struct file *file, unsigned long start, unsigned long len);
 int pmem_setup(struct android_pmem_platform_data *pdata,
-              long (*ioctl)(struct file *, unsigned int, unsigned long),
-              int (*release)(struct inode *, struct file *));
+	       long (*ioctl)(struct file *, unsigned int, unsigned long),
+	       int (*release)(struct inode *, struct file *));
 int pmem_remap(struct pmem_region *region, struct file *file,
-              unsigned operation);
+	       unsigned operation);
 
 #else
 static inline int is_pmem_file(struct file *file) { return 0; }
 static inline int get_pmem_file(int fd, unsigned long *start,
-                               unsigned long *vstart, unsigned long *end,
-                               struct file **filp) { return -ENOSYS; }
+				unsigned long *vstart, unsigned long *end,
+				struct file **filp) { return -ENOSYS; }
 static inline int get_pmem_user_addr(struct file *file, unsigned long *start,
-                                    unsigned long *end) { return -ENOSYS; }
+				     unsigned long *end) { return -ENOSYS; }
 static inline void put_pmem_file(struct file* file) { return; }
 static inline void flush_pmem_file(struct file *file, unsigned long start,
-                                  unsigned long len) { return; }
+				   unsigned long len) { return; }
 static inline int pmem_setup(struct android_pmem_platform_data *pdata,
-             long (*ioctl)(struct file *, unsigned int, unsigned long),
-             int (*release)(struct inode *, struct file *)) { return -ENOSYS; }
+	      long (*ioctl)(struct file *, unsigned int, unsigned long),
+	      int (*release)(struct inode *, struct file *)) { return -ENOSYS; }
 
 static inline int pmem_remap(struct pmem_region *region, struct file *file,
-                            unsigned operation) { return -ENOSYS; }
+			     unsigned operation) { return -ENOSYS; }
 #endif
 #endif /* __KERNEL__ */
 #endif //_ANDROID_PPP_H_
+

@@ -503,7 +503,7 @@ static int ekt8232_register_interrupt(struct i2c_client *client)
 	if (client->irq) {
 		ekt_data.use_irq = 1;
 
-		err = request_irq(client->irq, ekt8232_ts_interrupt, IRQF_TRIGGER_FALLING, //0,
+		err = request_irq(client->irq, ekt8232_ts_interrupt, 0,
 				  EKT8232NAME, &ekt_data);
 		if (err < 0) {
 			dev_err(&client->dev,
@@ -602,8 +602,7 @@ static int ekt8232_probe(
 	set_bit(BTN_2, ekt_data.input->keybit);
 	set_bit(EV_ABS, ekt_data.input->evbit);
 
-/*	if (ekt_data.fw_ver >= 0x104) {*/
-	if (ekt_data.fw_ver >= 0x100) {
+	if (ekt_data.fw_ver >= 0x104) {
 		err = ekt8232_get_data(ekt_data.client, x_resolution_cmd,
 				       buf_recv, 4, 0);
 		if (err < 0) {
@@ -628,10 +627,10 @@ static int ekt8232_probe(
 		y_max = ((buf_recv[3] & 0xf0) << 4) | ((buf_recv[2] & 0xff));
 		printk(KERN_INFO "ekt8232_probe: y_max: %d\n", y_max);
 		input_set_abs_params(ekt_data.input, ABS_X,
-				     pdata->abs_x_min, 576, //x_max,
+				     pdata->abs_x_min, x_max,
 				     ELAN_TS_FUZZ, ELAN_TS_FLAT);
 		input_set_abs_params(ekt_data.input, ABS_Y,
-				     pdata->abs_y_min, 960, //y_max,
+				     pdata->abs_y_min, y_max,
 				     ELAN_TS_FUZZ, ELAN_TS_FLAT);
 		input_set_abs_params(ekt_data.input, ABS_HAT0X,
 				     pdata->abs_x_min, x_max,
@@ -723,8 +722,7 @@ static int ekt8232_suspend(struct i2c_client *client, pm_message_t mesg)
 			__func__, rc);
 */
 	/* disable tp interrupt */
-	/*if (ekt_data.fw_ver > 0x101) {*/
-	if (1) {
+	if (ekt_data.fw_ver > 0x101) {
 		memset(cmd, disable_int, 4);
 		if ((i2c_master_send(client, cmd, sizeof(cmd))) != sizeof(cmd))
 			dev_err(&client->dev,
@@ -750,8 +748,7 @@ static int ekt8232_resume(struct i2c_client *client)
 	ekt_data.power(1);
 
 	/* re-initial */
-	/*if (ekt_data.fw_ver > 0x101) {*/
-	if (1) {
+	if (ekt_data.fw_ver > 0x101) {
 		msleep(500);
 		rc = ekt8232_ts_init(client);
 	} else {

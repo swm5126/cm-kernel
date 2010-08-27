@@ -20,10 +20,6 @@
 #include <linux/interrupt.h>
 #include <linux/wakelock.h>
 
-#ifdef CONFIG_MACH_HEROC
-#include <asm/mach-types.h>
-#endif
-
 #ifdef CONFIG_OPTICALJOYSTICK_CRUCIAL
 #include <asm/mach-types.h>
 #include <linux/curcial_oj.h>
@@ -136,31 +132,20 @@ static void report_key(struct gpio_kp *kp, int key_index, int out, int in)
 					out, in, mi->output_gpios[out],
 					mi->input_gpios[in], pressed);
 #ifdef CONFIG_OPTICALJOYSTICK_CRUCIAL
-			if ((machine_is_bravo() || machine_is_legend() ||
-				machine_is_latte() || machine_is_liberty()
-			|| machine_is_paradise() || machine_is_bravoc() ||
-							machine_is_bee())
-						&& keycode == BTN_MOUSE)
+			if (mi->info.oj_btn && keycode == BTN_MOUSE)
 				;
 			else
-#endif
-#ifdef CONFIG_MACH_HEROC
-			if (button_filter(kp->input_devs->dev[dev],
-				EV_KEY, keycode, pressed, kp->keys_pressed))
 #endif
 				input_report_key(kp->input_devs->dev[dev],
 							keycode, pressed);
 		}
 	}
 #ifdef CONFIG_OPTICALJOYSTICK_CRUCIAL
-	if ((machine_is_bravo() || machine_is_legend() || machine_is_latte()
-			|| machine_is_liberty() || machine_is_paradise() ||
-				machine_is_bravoc() || machine_is_bee()) &&
-							keycode == BTN_MOUSE) {
+	if (mi->info.oj_btn && keycode == BTN_MOUSE) {
 		if (need_send_spec_key == pressed) {
 			curcial_oj_send_key(keycode, pressed);
 			need_send_spec_key = !pressed;
-			printk(KERN_DEBUG "%s: send key, pressed: %d\n",
+			printk(KERN_INFO "%s: send OJ action key, pressed: %d\n",
 				__func__, need_send_spec_key);
 		}
 	}
@@ -258,7 +243,7 @@ static irqreturn_t gpio_keypad_irq_handler(int irq_in, void *dev_id)
 		return IRQ_HANDLED;
 
 	for (i = 0; i < mi->ninputs; i++)
-		disable_irq(gpio_to_irq(mi->input_gpios[i]));
+		disable_irq_nosync(gpio_to_irq(mi->input_gpios[i]));
 	for (i = 0; i < mi->noutputs; i++) {
 		if (gpio_keypad_flags & GPIOKPF_DRIVE_INACTIVE)
 			gpio_set_value(mi->output_gpios[i],
@@ -304,11 +289,6 @@ static int gpio_keypad_request_irqs(struct gpio_kp *kp)
 			pr_err("gpiomatrix: request_irq failed for input %d, "
 				"irq %d\n", mi->input_gpios[i], irq);
 			goto err_request_irq_failed;
-		}
-
-		if (mi->notintr_gpios == mi->input_gpios[i]) {
-			disable_irq(irq);
-			continue;
 		}
 		err = set_irq_wake(irq, 1);
 		if (err) {
@@ -416,10 +396,6 @@ int gpio_event_matrix_func(struct gpio_event_input_devs *input_devs,
 				goto err_gpio_direction_input_failed;
 			}
 		}
-
-		if (mi->setup_ninputs_gpio)
-			mi->setup_ninputs_gpio();
-
 		kp->current_output = mi->noutputs;
 		kp->key_state_changed = 1;
 

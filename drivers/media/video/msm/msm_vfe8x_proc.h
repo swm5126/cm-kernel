@@ -678,6 +678,13 @@ struct vfe_camifcfg {
 	 uint32_t /* reserved */ : 2;
 } __attribute__ ((packed, aligned(4)));
 
+struct vfe_epoch1cfg {
+	/* Epoch Interrupt */
+	uint32_t epoch1Line:14;
+	uint32_t /* reserved */ : 2;
+} __attribute__ ((packed, aligned(4)));
+
+
 struct vfe_camifframe_update {
 	uint32_t pixelsPerLine:14;
 	 uint32_t /* reserved */ : 2;
@@ -1557,6 +1564,11 @@ void vfe_fov_crop_config(struct vfe_cmd_fov_crop_config *);
 void vfe_get_hw_version(struct vfe_cmd_hw_version *);
 void vfe_reset(void);
 void vfe_cmd_release(struct platform_device *);
+#ifndef CONFIG_720P_CAMERA
 void vfe_output1_ack(struct vfe_cmd_output_ack *);
 void vfe_output2_ack(struct vfe_cmd_output_ack *);
+#else
+void vfe_output_p_ack(struct vfe_cmd_output_ack *);
+void vfe_output_v_ack(struct vfe_cmd_output_ack *);
+#endif
 #endif /* __MSM_VFE8X_REG_H__ */

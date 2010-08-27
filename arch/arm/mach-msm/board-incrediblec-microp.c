@@ -22,6 +22,7 @@
 #include <linux/input.h>
 #include <linux/uaccess.h>
 #include <linux/miscdevice.h>
+#include <linux/workqueue.h>
 #include <linux/wakelock.h>
 
 #include "board-incrediblec.h"
@@ -31,64 +32,18 @@
 
 static int misc_opened;
 static struct i2c_client *incrediblec_microp_client;
-/*
-static struct led_trigger incrediblec_als_level_trigger = {
-	.name     = "auto-backlight-trigger",
-};
-*/
-/*
-static void incrediblec_ap_key_led_delay(struct work_struct *work);
-static DECLARE_DELAYED_WORK(incrediblec_notifier_delay_work,
-		incrediblec_ap_key_led_delay);
-*/
+
+static void p_sensor_do_work(struct work_struct *w);
+static DECLARE_WORK(p_sensor_work, p_sensor_do_work);
+
 struct wake_lock proximity_wake_lock;
 
 static struct capella_cm3602_data {
 	struct input_dev *input_dev;
 	struct capella_cm3602_platform_data *pdata;
 	int enabled;
+	struct workqueue_struct *p_sensor_wq;
 } the_data;
-/*
-
-static int incrediblec_als_intr_enable(struct i2c_client *client,
-		uint32_t als_func, uint8_t enable)
-{
-
-	struct microp_i2c_client_data *cdata;
-
-	cdata = i2c_get_clientdata(client);
-
-	return microp_write_interrupt(client,
-		cdata->int_pin.int_lsensor, enable);
-*/
-/*
-	struct microp_i2c_client_data *cdata;
-	uint8_t data[2];
-	int ret = 0;
-
-	cdata = i2c_get_clientdata(client);
-	mutex_lock(&cdata->microp_i2c_mutex);
-	cdata->als_func = enable ? (cdata->als_func |= als_func)
-				: (cdata->als_func &= ~als_func);
-
-	data[0] = 0;
-	if (cdata->als_func)
-		data[1] = 1;
-	else
-		data[1] = 0;
-
-	ret = microp_i2c_write(MICROP_I2C_WCMD_AUTO_BL_CTL, data, 2);
-	if (ret != 0)
-		printk(KERN_ERR "%s: set auto light sensor fail\n", __func__);
-
-	mutex_unlock(&cdata->microp_i2c_mutex);
-
-	return ret;
-*/
-
-/*
-}
-*/
 
 static int psensor_intr_enable(uint8_t enable)
 {
@@ -110,111 +65,6 @@ static int psensor_intr_enable(uint8_t enable)
 	return ret;
 }
 
-/*
-static int incrediblec_als_table_init(struct i2c_client *client,
-			int i, uint32_t kadc, uint32_t gadc)
-{
-	struct microp_i2c_platform_data *pdata;
-	uint8_t data[20];
-	int j;
-
-	pdata = client->dev.platform_data;
-
-	for (j = 0; j < 10; j++) {
-		data[j] = (uint8_t)(pdata->microp_function[i].levels[j]
-				* kadc / gadc >> 8);
-		data[j + 10] = (uint8_t)(pdata->microp_function[i].levels[j]
-				* kadc / gadc);
-	}
-
-	return microp_i2c_write(MICROP_I2C_WCMD_ADC_TABLE, data, 20);
-}
-*/
-/*
-static void incrediblec_vkey_led_enable(int on)
-{
-	int ret;
-
-	ret = gpio_direction_output(INCREDIBLEC_AP_KEY_LED_EN, on);
-	if (ret < 0)
-		pr_err("%s: failed on set AP Key LED=%d\n", __func__, on);
-}
-
-static void incrediblec_vkey_led_control(struct microp_led_data *ldata)
-{
-	incrediblec_vkey_led_enable((int)ldata->mode);
-}
-*/
-/*
-static void incrediblec_als_level_change(struct i2c_client *client,
-		uint8_t *data)
-{
-	struct microp_i2c_client_data *cdata  = i2c_get_clientdata(client);
-	int on = -1;
-
-	if (cdata->als_func & ALS_VKEY_LED) {
-		if (data[2] >= 4)
-			on = 0;
-		else if (data[2] <= 2)
-			on = 1;
-
-		if (on >= 0)
-			incrediblec_vkey_led_enable(on);
-	}
-}
-
-static void incrediblec_ap_key_led_delay(struct work_struct *work)
-{
-	struct i2c_client *client = incrediblec_microp_client;
-	struct microp_led_data *ldata = incrediblec_vkey_backlight;
-	uint8_t data[2];
-	int ret = 0;
-
-	data[0] = 0;
-	data[1] = 0;
-	ret = microp_i2c_write(MICROP_I2C_WCMD_AUTO_BL_CTL, data, 2);
-	if (ret != 0)
-		printk(KERN_ERR "%s: set auto light sensor disable fail\n",
-			__func__);
-
-	if (ldata->mode == 0)
-		return;
-
-	ret = incrediblec_als_intr_enable(client, ALS_VKEY_LED, 1);
-	if (ret != 0)
-		printk(KERN_ERR "%s: set auto light sensor enable fail\n",
-			__func__);
-}
-
-static void incrediblec_notifier_func(struct i2c_client *client,
-			struct microp_led_data *ldata)
-{
-	struct microp_i2c_client_data *cdata;
-	unsigned long delay_time;
-	int on;
-
-	cdata = i2c_get_clientdata(client);
-	incrediblec_vkey_backlight = ldata;
-	cancel_delayed_work(&incrediblec_notifier_delay_work);
-
-	on = ldata->ldev.brightness ? 1 : 0;
-	incrediblec_vkey_led_enable(on);
-	cdata->als_func &= ~ALS_VKEY_LED;
-
-	if (ldata->mode)
-		delay_time = HZ * 10;
-	else
-		delay_time = 0;
-	queue_delayed_work(cdata->microp_queue,
-			&incrediblec_notifier_delay_work, delay_time);
-}
-*/
-/*
-static int incrediblec_als_power_init(void)
-{
-	return incrediblec_als_power(LS_PWR_ON, 1);
-}
-*/
 static int incrediblec_microp_function_init(struct i2c_client *client)
 {
 	struct microp_i2c_platform_data *pdata;
@@ -227,23 +77,6 @@ static int incrediblec_microp_function_init(struct i2c_client *client)
 	pdata = client->dev.platform_data;
 	cdata = i2c_get_clientdata(client);
 
-	/* Light sensor */
-/*
-	ret = microp_function_check(client, MICROP_FUNCTION_LSENSOR);
-	if (ret >= 0) {
-		i = ret;
-		pdata->function_node[MICROP_FUNCTION_LSENSOR] = i;
-		cdata->int_pin.int_lsensor = pdata->microp_function[i].int_pin;
-		microp_get_als_kvalue(i);
-
-		ret = incrediblec_als_table_init(client, i,
-				cdata->als_kadc, cdata->als_gadc);
-		if (ret < 0)
-			goto exit;
-
-		incrediblec_als_power_init();
-	}
-*/
 	/* Headset remote key */
 	ret = microp_function_check(client, MICROP_FUNCTION_REMOTEKEY);
 	if (ret >= 0) {
@@ -296,39 +129,6 @@ exit:
 	return ret;
 }
 
-static void psensor_init_callback(void);
-
-void incrediblec_psensor_irq(int ps_data)
-{
-	if (ps_data < 0 || ps_data > 1) {
-		pr_err("%s: interrupt data from microp error, ps_data = %d\n",
-			__func__, ps_data);
-		return;
-	}
-
-	pr_info("proximity %s\n", ps_data ? "FAR" : "NEAR");
-
-	/* 0 is close, 1 is far */
-	input_report_abs(the_data.input_dev, ABS_DISTANCE, ps_data);
-	input_sync(the_data.input_dev);
-
-	wake_lock_timeout(&proximity_wake_lock, 2*HZ);
-}
-
-static struct microp_psensor_callback ps_callback = {
-	.ps_init = psensor_init_callback,
-	.ps_intr = incrediblec_psensor_irq
-};
-
-static void psensor_init_callback(void)
-{
-	pr_info("%s\n", __func__);
-
-	if (microp_register_ps_callback(&ps_callback))
-		pr_err("%s: capella_cm3602 init before Microp!!\n",
-			__func__);
-}
-
 static int report_psensor_data(void)
 {
 	int ret, ps_data = 0;
@@ -339,7 +139,13 @@ static int report_psensor_data(void)
 		pr_err("%s: read data failed\n", __func__);
 	else {
 		ps_data = (data[2] & 0x10) ? 1 : 0;
-		incrediblec_psensor_irq(ps_data);
+		pr_info("proximity %s\n", ps_data ? "FAR" : "NEAR");
+
+		/* 0 is close, 1 is far */
+		input_report_abs(the_data.input_dev, ABS_DISTANCE, ps_data);
+		input_sync(the_data.input_dev);
+
+		wake_lock_timeout(&proximity_wake_lock, 2*HZ);
 	}
 
 	return ret;
@@ -480,6 +286,18 @@ static long capella_cm3602_ioctl(struct file *file,
 		return -EINVAL;
 	}
 }
+static void p_sensor_do_work(struct work_struct *w)
+{
+	report_psensor_data();
+}
+
+static irqreturn_t p_sensor_irq_handler(int irq, void *data)
+{
+	struct capella_cm3602_data *ip = data;
+	queue_work(ip->p_sensor_wq, &p_sensor_work);
+
+	return IRQ_HANDLED;
+}
 
 static struct file_operations capella_cm3602_fops = {
 	.owner = THIS_MODULE,
@@ -506,17 +324,7 @@ static int capella_cm3602_probe(struct platform_device *pdev)
 
 	pr_info("%s: probe\n", __func__);
 
-	pdata = pdev->dev.platform_data;
-
-	if (!microp_register_ps_callback(&ps_callback))
-		printk(KERN_ERR "%s: Microp has been initialized!!\n",
-				__func__);
-
-	if (!pdata) {
-		pr_err("%s: missing pdata!\n", __func__);
-		rc = -ENODEV;
-		goto done;
-	}
+	pdata = dev_get_platdata(&pdev->dev);
 
 	ip = &the_data;
 	platform_set_drvdata(pdev, ip);
@@ -573,6 +381,12 @@ static int capella_cm3602_probe(struct platform_device *pdev)
 		goto err_create_proximity_device_file;
 	}
 
+	ip->p_sensor_wq = create_workqueue("p-sensor_microp_wq");
+	if (ip->p_sensor_wq == NULL) {
+		pr_err("%s: create_workqueue failed\n", __func__);
+		goto err_create_workqueue;
+	}
+
 	rc = gpio_request(pdata->p_en, "gpio_proximity_en");
 	if (rc < 0) {
 		pr_err("%s: gpio %d request failed (%d)\n",
@@ -580,9 +394,22 @@ static int capella_cm3602_probe(struct platform_device *pdev)
 		goto err_request_proximity_en;
 	}
 
+	rc = request_irq(pdata->p_out, p_sensor_irq_handler,
+					IRQF_TRIGGER_NONE, "p-sensor_microp", ip);
+	if (rc < 0) {
+		pr_err("%s: request_irq(%d) failed for (%d)\n",
+				__func__, pdata->p_out, rc);
+		goto err_request_proximity_irq;
+	}
+
+
 	goto done;
 
+err_request_proximity_irq:
+	gpio_free(pdata->p_en);
 err_request_proximity_en:
+	destroy_workqueue(ip->p_sensor_wq);
+err_create_workqueue:
 	device_remove_file(proximity_attr_dev, &dev_attr_proximity);
 err_create_proximity_device_file:
 	device_unregister(proximity_attr_dev);
@@ -600,16 +427,10 @@ done:
 
 static struct microp_ops ops = {
 	.init_microp_func = incrediblec_microp_function_init,
-	/*.als_pwr_enable = incrediblec_als_power,*/
-	/*.als_level_change = incrediblec_als_level_change,*/
-	/*.als_intr_enable = incrediblec_als_intr_enable,*/
-	/*.notifier_func = incrediblec_notifier_func,*/
-	/*.led_gpio_set = incrediblec_vkey_led_control,*/
 };
 
 void __init incrediblec_microp_init(void)
 {
-	/*led_trigger_register(&incrediblec_als_level_trigger);*/
 	microp_register_ops(&ops);
 }
 

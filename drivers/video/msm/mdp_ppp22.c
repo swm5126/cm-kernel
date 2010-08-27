@@ -374,11 +374,11 @@ static struct mdp_table_entry mdp_downscale_x_table_PT8TO1[] = {
 	{ 0x502fc,  0x34003fe },
 };
 
-struct mdp_table_entry* mdp_downscale_x_table[MDP_DOWNSCALE_MAX] = {
-	[ MDP_DOWNSCALE_PT2TOPT4] = mdp_downscale_x_table_PT2TOPT4,
-	[ MDP_DOWNSCALE_PT4TOPT6] = mdp_downscale_x_table_PT4TOPT6,
-	[ MDP_DOWNSCALE_PT6TOPT8] = mdp_downscale_x_table_PT6TOPT8,
-	[ MDP_DOWNSCALE_PT8TO1]  = mdp_downscale_x_table_PT8TO1,
+struct mdp_table_entry *mdp_downscale_x_table[MDP_DOWNSCALE_MAX] = {
+	[MDP_DOWNSCALE_PT2TOPT4] = mdp_downscale_x_table_PT2TOPT4,
+	[MDP_DOWNSCALE_PT4TOPT6] = mdp_downscale_x_table_PT4TOPT6,
+	[MDP_DOWNSCALE_PT6TOPT8] = mdp_downscale_x_table_PT6TOPT8,
+	[MDP_DOWNSCALE_PT8TO1]  = mdp_downscale_x_table_PT8TO1,
 };
 
 static struct mdp_table_entry mdp_downscale_y_table_PT2TOPT4[] = {
@@ -650,10 +650,10 @@ static struct mdp_table_entry mdp_downscale_y_table_PT8TO1[] = {
 };
 
 struct mdp_table_entry *mdp_downscale_y_table[MDP_DOWNSCALE_MAX] = {
-	[ MDP_DOWNSCALE_PT2TOPT4] = mdp_downscale_y_table_PT2TOPT4,
-	[ MDP_DOWNSCALE_PT4TOPT6] = mdp_downscale_y_table_PT4TOPT6,
-	[ MDP_DOWNSCALE_PT6TOPT8] = mdp_downscale_y_table_PT6TOPT8,
-	[ MDP_DOWNSCALE_PT8TO1]  = mdp_downscale_y_table_PT8TO1,
+	[MDP_DOWNSCALE_PT2TOPT4] = mdp_downscale_y_table_PT2TOPT4,
+	[MDP_DOWNSCALE_PT4TOPT6] = mdp_downscale_y_table_PT4TOPT6,
+	[MDP_DOWNSCALE_PT6TOPT8] = mdp_downscale_y_table_PT6TOPT8,
+	[MDP_DOWNSCALE_PT8TO1]  = mdp_downscale_y_table_PT8TO1,
 };
 
 struct mdp_table_entry mdp_gaussian_blur_table[] = {
@@ -1082,34 +1082,10 @@ int mdp_ppp_load_blur(const struct mdp_info *mdp)
 	return 0;
 }
 
-#define MDP_SCALE_CFG_RETRY	3
 void mdp_ppp_init_scale(const struct mdp_info *mdp)
 {
-	int i, r;
-
 	downscale_x_table = MDP_DOWNSCALE_MAX;
 	downscale_y_table = MDP_DOWNSCALE_MAX;
 
-	for (i = 0; i < ARRAY_SIZE(mdp_upscale_table); i++) {
-		mdp_writel(mdp, mdp_upscale_table[i].val,
-				mdp_upscale_table[i].reg);
-		/* Workaround for MDP defect(couples of lines presented in
-		 * ROI while scaling up image) based on QCT's suggestion
-		 */
-		for(r = 0 ; r < MDP_SCALE_CFG_RETRY ; r++) {
-			if (mdp_readl(mdp, mdp_upscale_table[i].reg) ==
-					mdp_upscale_table[i].val)
-				break ;
-			pr_err("MDP: failed to config PPP up scale coefficients"
-					" table: reg=0x%08X, val=0x%08X\n",
-					mdp_upscale_table[i].reg,
-					mdp_upscale_table[i].val);
-			mdp_writel(mdp, mdp_upscale_table[i].val,
-					mdp_upscale_table[i].reg);
-		}
-		if (MDP_SCALE_CFG_RETRY == r) {
-			pr_err("MDP: PPP is defective and unrepairable!\n");
-			BUG();
-		}
-	}
+	load_table(mdp, mdp_upscale_table, ARRAY_SIZE(mdp_upscale_table));
 }

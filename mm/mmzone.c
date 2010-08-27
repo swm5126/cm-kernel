@@ -76,14 +76,14 @@ struct zoneref *next_zones_zonelist(struct zoneref *z,
 
 #ifdef CONFIG_ARCH_HAS_HOLES_MEMORYMODEL
 int memmap_valid_within(unsigned long pfn,
-                                       struct page *page, struct zone *zone)
+					struct page *page, struct zone *zone)
 {
-       if (page_to_pfn(page) != pfn)
-               return 0;
+	if (page_to_pfn(page) != pfn)
+		return 0;
 
-       if (page_zone(page) != zone)
-               return 0;
+	if (page_zone(page) != zone)
+		return 0;
 
-       return 1;
+	return 1;
 }
 #endif /* CONFIG_ARCH_HAS_HOLES_MEMORYMODEL */

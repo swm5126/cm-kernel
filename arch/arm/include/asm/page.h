@@ -12,7 +12,7 @@
 
 /* PAGE_SHIFT determines the page size */
 #define PAGE_SHIFT		12
-#define PAGE_SIZE		(1UL << PAGE_SHIFT)
+#define PAGE_SIZE		(_AC(1,UL) << PAGE_SHIFT)
 #define PAGE_MASK		(~(PAGE_SIZE-1))
 
 #ifndef __ASSEMBLY__
@@ -73,6 +73,14 @@
 #  define MULTI_USER 1
 # else
 #  define _USER feroceon
+# endif
+#endif
+
+#ifdef CONFIG_CPU_COPY_FA
+# ifdef _USER
+#  define MULTI_USER 1
+# else
+#  define _USER fa
 # endif
 #endif
 
@@ -198,6 +206,6 @@ extern int pfn_valid(unsigned long);
 	(((current->personality & READ_IMPLIES_EXEC) ? VM_EXEC : 0) | \
 	 VM_READ | VM_WRITE | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
-#include <asm-generic/page.h>
+#include <asm-generic/getorder.h>
 
 #endif

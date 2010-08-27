@@ -67,7 +67,7 @@ static int dummy_keypad_init_func(void)
 	dummy_keypad->input_dev->name = DRIVER_NAME;
 	set_bit(EV_KEY, dummy_keypad->input_dev->evbit);
 	/* Setting USB HUT keycode */
-	for(loop_i = 0; loop_i < dummy_keypad->usb_hut_keymap_size; loop_i++)	{
+	for (loop_i = 0; loop_i < dummy_keypad->usb_hut_keymap_size; loop_i++)	{
 		if (dummy_keypad->usb_hut_keymap[loop_i])
 			set_bit(dummy_keypad->usb_hut_keymap[loop_i] & KEY_MAX,
 				dummy_keypad->input_dev->keybit);

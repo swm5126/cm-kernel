@@ -22,8 +22,6 @@
 #include <linux/types.h>
 #include <mach/camera.h>
 
-extern struct mt9d112_reg mt9d112_regs;
-
 enum mt9d112_width {
 	WORD_LEN,
 	BYTE_LEN

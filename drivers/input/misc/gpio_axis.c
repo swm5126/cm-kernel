@@ -17,18 +17,11 @@
 #include <linux/gpio.h>
 #include <linux/gpio_event.h>
 #include <linux/interrupt.h>
-#ifdef CONFIG_MACH_HERO
-#include <linux/hrtimer.h>
-#include <asm/atomic.h>
-#endif
+
 struct gpio_axis_state {
 	struct gpio_event_input_devs *input_devs;
 	struct gpio_event_axis_info *info;
 	uint32_t pos;
-#ifdef CONFIG_MACH_HERO
-	struct hrtimer emc_hrtimer_delay;
-	atomic_t atomic_emc_hrtimer_is_run;
-#endif
 };
 
 uint16_t gpio_axis_4bit_gray_map_table[] = {
@@ -108,64 +101,10 @@ static void gpio_event_update_axis(struct gpio_axis_state *as, int report)
 	as->pos = pos;
 }
 
-#ifdef CONFIG_MACH_HERO
-static enum hrtimer_restart emc_progress_hrtimer_handler_func
-							(struct hrtimer *timer)
-{
-
-	struct gpio_axis_state *as =
-		container_of(timer, struct gpio_axis_state, emc_hrtimer_delay);
-	struct gpio_event_axis_info *ai = as->info;
-	uint16_t dmc_gpio_status = 0;
-	int i;
-
-	atomic_set(&as->atomic_emc_hrtimer_is_run, 0);
-	for (i = ai->count - 1; i >= 0; i--)
-		dmc_gpio_status =
-			(dmc_gpio_status << 1) | gpio_get_value(ai->gpio[i]);
-	if(dmc_gpio_status == ai->emc_gpio_state)
-		gpio_event_update_axis(as, 1);
-
-	for (i = ai->count - 1; i >= 0; i--) {
-		if(atomic_read(&ai->emc_disable_irqnum) & (1 << i)) {
-			enable_irq(gpio_to_irq(ai->gpio[i]));
-			atomic_set(&ai->emc_disable_irqnum,
-				atomic_read(&ai->emc_disable_irqnum) &
-							~(1 << i));
-		}
-	}
-
-	return HRTIMER_NORESTART;
-}
-#endif
-
 static irqreturn_t gpio_axis_irq_handler(int irq, void *dev_id)
 {
 	struct gpio_axis_state *as = dev_id;
-#ifdef CONFIG_MACH_HERO
-	struct gpio_event_axis_info *ai = as->info;
-	int i;
-	if(ai->enable_emc_protect_delay) {
-		ai->emc_gpio_state = 0;
-		for (i = ai->count - 1; i >= 0; i--) {
-			ai->emc_gpio_state = (ai->emc_gpio_state << 1) |
-						gpio_get_value(ai->gpio[i]);
-			if(irq == gpio_to_irq(ai->gpio[i])) {
-				atomic_set(&ai->emc_disable_irqnum,
-					atomic_read(&ai->emc_disable_irqnum) |
-								(1 << i));
-				disable_irq(gpio_to_irq(ai->gpio[i]));
-			}
-		}
-		if(!atomic_read(&as->atomic_emc_hrtimer_is_run)) {
-			atomic_set(&as->atomic_emc_hrtimer_is_run, 1);
-			hrtimer_start(&as->emc_hrtimer_delay,
-				ktime_set(0, ai->enable_emc_protect_delay),
-							HRTIMER_MODE_REL);
-		}
-	} else
-#endif
-		gpio_event_update_axis(as, 1);
+	gpio_event_update_axis(as, 1);
 	return IRQ_HANDLED;
 }
 
@@ -196,18 +135,6 @@ int gpio_event_axis_func(struct gpio_event_input_devs *input_devs,
 			ret = -ENOMEM;
 			goto err_alloc_axis_state_failed;
 		}
-#ifdef CONFIG_MACH_HERO
-		if(ai->enable_emc_protect_delay) {
-			printk(KERN_DEBUG "%s: enable emc_protect: %d\n",
-				__func__, ai->enable_emc_protect_delay);
-			atomic_set(&ai->emc_disable_irqnum, 0);
-			atomic_set(&as->atomic_emc_hrtimer_is_run, 0);
-			hrtimer_init(&as->emc_hrtimer_delay, CLOCK_MONOTONIC,
-							HRTIMER_MODE_REL);
-			as->emc_hrtimer_delay.function =
-					emc_progress_hrtimer_handler_func;
-		}
-#endif
 		as->input_devs = input_devs;
 		as->info = ai;
 		if (ai->dev >= input_devs->count) {

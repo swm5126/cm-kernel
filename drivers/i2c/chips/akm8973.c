@@ -547,7 +547,7 @@ static void akm_work_func(struct work_struct *work)
 static irqreturn_t akm8973_interrupt(int irq, void *dev_id)
 {
 	struct akm8973_data *data = dev_id;
-	disable_irq(this_client->irq);
+	disable_irq_nosync(this_client->irq);
 	schedule_work(&data->work);
 	return IRQ_HANDLED;
 }
@@ -757,7 +757,6 @@ static int akm8973_remove(struct i2c_client *client)
 	struct akm8973_data *akm = i2c_get_clientdata(client);
 	free_irq(client->irq, akm);
 	input_unregister_device(akm->input_dev);
-	i2c_detach_client(client);
 	kfree(akm);
 	if (pdata && pdata->reset)
 		gpio_free(pdata->reset);
@@ -791,5 +790,6 @@ static void __exit akm8973_exit(void)
 module_init(akm8973_init);
 module_exit(akm8973_exit);
 
+MODULE_AUTHOR("viral wang <viral_wang@htc.com>");
 MODULE_DESCRIPTION("AKM8973 compass driver");
 MODULE_LICENSE("GPL");

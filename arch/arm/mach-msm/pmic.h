@@ -261,7 +261,7 @@ enum pm_vib_mot_pol {
 	PM_VIB_MOT_POL__ACTIVE_LOW,
 };
 
-struct rtc_time {
+struct qct_rtc_time {
 	uint  sec;
 };
 
@@ -269,6 +269,41 @@ enum rtc_alarm {
 	PM_RTC_ALARM_1,
 };
 
+enum hsed_controller {
+	PM_HSED_CONTROLLER_0,
+	PM_HSED_CONTROLLER_1,
+	PM_HSED_CONTROLLER_2,
+};
+
+enum hsed_enable {
+	PM_HSED_ENABLE_OFF,
+	PM_HSED_ENABLE_TCXO,
+	PM_HSED_ENABLE_PWM_TCXO,
+	PM_HSED_ENABLE_ALWAYS,
+};
+
+enum high_current_ledtype {
+	PM_FLASH_DRV0_LED,
+	PM_FLASH_DRV1_LED,
+	PM_KBD_DRV_LED,
+};
+
+enum low_current_ledtype {
+	PM_LOW_CURRENT_LED_DRV0,
+	PM_LOW_CURRENT_LED_DRV1,
+	PM_LOW_CURRENT_LED_DRV2,
+};
+
+enum ext_signal_selection_type {
+	PM_CURRENT_SINK_MANUAL_MODE,
+	PM_CURRENT_SINK_PWM1,
+	PM_CURRENT_SINK_PWM2,
+	PM_CURRENT_SINK_PWM3,
+	PM_CURRENT_SINK_DTEST1,
+	PM_CURRENT_SINK_DTEST2,
+	PM_CURRENT_SINK_DTEST3,
+	PM_CURRENT_SINK_DTEST4,
+};
 
 int pmic_lp_mode_control(enum switch_cmd cmd, enum vreg_lp_id id);
 int pmic_secure_mpp_control_digital_output(enum mpp_which which,
@@ -306,5 +341,15 @@ int pmic_vib_mot_set_mode(enum pm_vib_mot_mode mode);
 int pmic_vib_mot_set_polarity(enum pm_vib_mot_pol pol);
 int pmic_vid_en(uint enable);
 int pmic_vid_load_detect_en(uint enable);
+int pmic_high_current_led_set_current(enum high_current_ledtype type, int milliamps);
+int pmic_high_current_led_set_mode(enum high_current_ledtype type, int mode);
+int pmic_high_current_led_set_polarity(enum high_current_ledtype type, enum flash_led_pol pol);
+int pmic_low_current_led_set_ext_signal(enum low_current_ledtype type,
+					enum ext_signal_selection_type signal_type);
+int pmic_low_current_led_set_current(enum low_current_ledtype type, int milliamps);
 
+int pmic_hsed_enable(
+	enum hsed_controller controller,
+	enum hsed_enable enable
+);
 #endif

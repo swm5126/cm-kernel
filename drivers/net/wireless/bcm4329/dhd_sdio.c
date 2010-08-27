@@ -1,7 +1,7 @@
 /*
  * DHD Bus Module for SDIO
  *
- * Copyright (C) 1999-2009, Broadcom Corporation
+ * Copyright (C) 1999-2010, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd_sdio.c,v 1.157.2.27.2.33.2.89 2009/10/28 05:49:40 Exp $
+ * $Id: dhd_sdio.c,v 1.157.2.27.2.33.2.109 2010/04/22 05:52:46 Exp $
  */
 
 #include <typedefs.h>
@@ -40,6 +40,7 @@
 #include <siutils.h>
 #include <hndpmu.h>
 #include <hndsoc.h>
+#include <hndrte_armtrap.h>
 #include <sbchipc.h>
 #include <sbhnddma.h>
 
@@ -293,10 +294,8 @@ static int tx_packets[NUMPRIO];
 /* Deferred transmit */
 const uint dhd_deferred_tx = 1;
 
-#if !defined(CONTINUOUS_WATCHDOG)
 extern uint dhd_watchdog_ms;
 extern void dhd_os_wd_timer(void *bus, uint wdtick);
-#endif /* !defined(CONTINUOUS_WATCHDOG) */
 
 /* Tx/Rx bounds */
 uint dhd_txbound;
@@ -406,6 +405,7 @@ static void dhdsdio_testrcv(dhd_bus_t *bus, void *pkt, uint seq);
 static void dhdsdio_sdtest_set(dhd_bus_t *bus, bool start);
 #endif
 
+static int dhdsdio_checkdied(dhd_bus_t *bus, uint8 *data, uint size);
 static int dhdsdio_download_state(dhd_bus_t *bus, bool enter);
 
 static void dhdsdio_release(dhd_bus_t *bus, osl_t *osh);
@@ -514,9 +514,6 @@ dhdsdio_htclk(dhd_bus_t *bus, bool on, bool pendok)
 
 		/* Go to pending and await interrupt if appropriate */
 		if (!SBSDIO_CLKAV(clkctl, bus->alp_only) && pendok) {
-			DHD_INFO(("CLKCTL: set PENDING\n"));
-			bus->clkstate = CLK_PENDING;
-
 			/* Allow only clock-available interrupt */
 			devctl = bcmsdh_cfg_read(sdh, SDIO_FUNC_1, SBSDIO_DEVICE_CTL, &err);
 			if (err) {
@@ -527,6 +524,8 @@ dhdsdio_htclk(dhd_bus_t *bus, bool on, bool pendok)
 
 			devctl |= SBSDIO_DEVCTL_CA_INT_ONLY;
 			bcmsdh_cfg_write(sdh, SDIO_FUNC_1, SBSDIO_DEVICE_CTL, devctl, &err);
+			DHD_INFO(("CLKCTL: set PENDING\n"));
+			bus->clkstate = CLK_PENDING;
 			return BCME_OK;
 		} else if (bus->clkstate == CLK_PENDING) {
 			/* Cancel CA-only interrupt filter */
@@ -693,9 +692,7 @@ dhdsdio_clkctl(dhd_bus_t *bus, uint target, bool pendok)
 	/* Early exit if we're already there */
 	if (bus->clkstate == target) {
 		if (target == CLK_AVAIL) {
-#if !defined(CONTINUOUS_WATCHDOG)
 			dhd_os_wd_timer(bus->dhd, dhd_watchdog_ms);
-#endif /* !defined(CONTINUOUS_WATCHDOG) */
 			bus->activity = TRUE;
 		}
 		return BCME_OK;
@@ -708,9 +705,7 @@ dhdsdio_clkctl(dhd_bus_t *bus, uint target, bool pendok)
 			dhdsdio_sdclk(bus, TRUE);
 		/* Now request HT Avail on the backplane */
 		dhdsdio_htclk(bus, TRUE, pendok);
-#if !defined(CONTINUOUS_WATCHDOG)
 		dhd_os_wd_timer(bus->dhd, dhd_watchdog_ms);
-#endif /* !defined(CONTINUOUS_WATCHDOG) */
 		bus->activity = TRUE;
 		break;
 
@@ -723,9 +718,7 @@ dhdsdio_clkctl(dhd_bus_t *bus, uint target, bool pendok)
 		else
 			DHD_ERROR(("dhdsdio_clkctl: request for %d -> %d\n",
 			           bus->clkstate, target));
-#if !defined(CONTINUOUS_WATCHDOG)
 		dhd_os_wd_timer(bus->dhd, dhd_watchdog_ms);
-#endif /* !defined(CONTINUOUS_WATCHDOG) */
 		break;
 
 	case CLK_NONE:
@@ -734,9 +727,7 @@ dhdsdio_clkctl(dhd_bus_t *bus, uint target, bool pendok)
 			dhdsdio_htclk(bus, FALSE, FALSE);
 		/* Now remove the SD clock */
 		dhdsdio_sdclk(bus, FALSE);
-#if !defined(CONTINUOUS_WATCHDOG)
 		dhd_os_wd_timer(bus->dhd, 0);
-#endif /* !defined(CONTINUOUS_WATCHDOG) */
 		break;
 	}
 #ifdef DHD_DEBUG
@@ -858,7 +849,7 @@ dhd_enable_oob_intr(struct dhd_bus *bus, bool enable)
 
 	/* Turn off our contribution to the HT clock request */
 	dhdsdio_clkctl(bus, CLK_SDONLY, FALSE);
-#endif /* defined(HW_OOB) */
+#endif /* !defined(HW_OOB) */
 }
 #endif /* defined(OOB_INTR_ONLY) */
 
@@ -1058,6 +1049,8 @@ dhd_bus_txdata(struct dhd_bus *bus, void *pkt)
 	if (dhd_deferred_tx || bus->fcstate || pktq_len(&bus->txq) || bus->dpc_sched ||
 	    (!DATAOK(bus)) || (bus->flowcontrol & NBITVAL(prec)) ||
 	    (bus->clkstate == CLK_PENDING)) {
+		DHD_TRACE(("%s: deferring pktq len %d\n", __FUNCTION__,
+			pktq_len(&bus->txq)));
 		bus->fcqueued++;
 
 		/* Priority based enq */
@@ -1066,10 +1059,11 @@ dhd_bus_txdata(struct dhd_bus *bus, void *pkt)
 			PKTPULL(osh, pkt, SDPCM_HDRLEN);
 			dhd_txcomplete(bus->dhd, pkt, FALSE);
 			PKTFREE(osh, pkt, TRUE);
+			DHD_ERROR(("%s: out of bus->txq !!!\n", __FUNCTION__));
 			ret = BCME_NORESOURCE;
-		}
-		else
+		} else {
 			ret = BCME_OK;
+		}
 		dhd_os_sdunlock_txq(bus->dhd);
 
 		if ((pktq_len(&bus->txq) >= FCHI) && dhd_doflow)
@@ -1093,6 +1087,7 @@ dhd_bus_txdata(struct dhd_bus *bus, void *pkt)
 		dhdsdio_clkctl(bus, CLK_AVAIL, TRUE);
 
 #ifndef SDTEST
+		DHD_TRACE(("%s: calling txpkt\n", __FUNCTION__));
 		ret = dhdsdio_txpkt(bus, pkt, SDPCM_DATA_CHANNEL, TRUE);
 #else
 		ret = dhdsdio_txpkt(bus, pkt,
@@ -1314,11 +1309,6 @@ dhd_bus_txctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 	return ret ? -EIO : 0;
 }
 
-#ifdef WLAN_PROTECT
-static int timeout_count = 0;
-static int start_poll = 0;
-extern void wl_iw_set_busdown(int busdown);
-#endif
 int
 dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 {
@@ -1345,19 +1335,17 @@ dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 		         __FUNCTION__, rxlen, msglen));
 	} else if (timeleft == 0) {
 		DHD_ERROR(("%s: resumed on timeout\n", __FUNCTION__));
-#ifdef WLAN_PROTECT
-		if (!start_poll) {
-			bus->pollrate = 1;
-			bus->poll = TRUE;
-			start_poll = 1;
-		}
-		timeout_count++;
-#endif
+		dhd_os_sdlock(bus->dhd);
+		dhdsdio_checkdied(bus, NULL, 0);
+		dhd_os_sdunlock(bus->dhd);
 	} else if (pending == TRUE) {
 		DHD_CTL(("%s: cancelled\n", __FUNCTION__));
 		return -ERESTARTSYS;
 	} else {
 		DHD_CTL(("%s: resumed for unknown reason?\n", __FUNCTION__));
+		dhd_os_sdlock(bus->dhd);
+		dhdsdio_checkdied(bus, NULL, 0);
+		dhd_os_sdunlock(bus->dhd);
 	}
 
 	if (rxlen)
@@ -1365,28 +1353,6 @@ dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 	else
 		bus->dhd->rx_ctlerrs++;
 
-#ifdef WLAN_PROTECT
-	if (rxlen) {
-		timeout_count = 0;
-		if (start_poll) {
-			printk("stop poll\n");
-			bus->pollrate = 0;
-			bus->poll = FALSE;
-			start_poll = 0;
-		}
-	}
-	if (timeout_count == 2) {
-		timeout_count = 0;
-		bus->dhd->busstate = DHD_BUS_DOWN;
-		if (start_poll) {
-			bus->pollrate = 0;
-			bus->poll = FALSE;
-			start_poll = 0;
-		}
-		wl_iw_set_busdown(1);
-		DHD_ERROR(("bring bus down!\n"));
-	}
-#endif
 	return rxlen ? (int)rxlen : -ETIMEDOUT;
 }
 
@@ -1399,6 +1365,7 @@ enum {
 	IOV_SDCIS,
 	IOV_MEMBYTES,
 	IOV_MEMSIZE,
+	IOV_CHECKDIED,
 	IOV_DOWNLOAD,
 	IOV_FORCEEVEN,
 	IOV_SDIOD_DRIVE,
@@ -1449,6 +1416,7 @@ const bcm_iovar_t dhdsdio_iovars[] = {
 	{"rxbound",	IOV_RXBOUND,	0,	IOVT_UINT32,	0 },
 	{"txminmax", IOV_TXMINMAX,	0,	IOVT_UINT32,	0 },
 	{"cpu",		IOV_CPU,	0,	IOVT_BOOL,	0 },
+	{"checkdied",	IOV_CHECKDIED,	0,	IOVT_BUFFER,	0 },
 #endif /* DHD_DEBUG */
 #ifdef SDTEST
 	{"extloop",	IOV_EXTLOOP,	0,	IOVT_BOOL,	0 },
@@ -1632,11 +1600,6 @@ dhdsdio_membytes(dhd_bus_t *bus, bool write, uint32 address, uint8 *data, uint s
 	uint32 sdaddr;
 	uint dsize;
 
-	if (size % 4) {
-		size += 3;
-		size &= 0xFFFFFFFC;
-	}
-
 	/* Determine initial transfer parameters */
 	sdaddr = address & SBSDIO_SB_OFT_ADDR_MASK;
 	if ((sdaddr + size) & SBSDIO_SBWINDOW_MASK)
@@ -1683,6 +1646,166 @@ xfer_done:
 	return bcmerror;
 }
 
+static int
+dhdsdio_readshared(dhd_bus_t *bus, sdpcm_shared_t *sh)
+{
+	uint32 addr;
+	int rv;
+
+	/* Read last word in memory to determine address of sdpcm_shared structure */
+	if ((rv = dhdsdio_membytes(bus, FALSE, bus->ramsize - 4, (uint8 *)&addr, 4)) < 0)
+		return rv;
+
+	addr = ltoh32(addr);
+
+	DHD_INFO(("sdpcm_shared address 0x%08X\n", addr));
+
+	/*
+	 * Check if addr is valid.
+	 * NVRAM length at the end of memory should have been overwritten.
+	 */
+	if (addr == 0 || ((~addr >> 16) & 0xffff) == (addr & 0xffff)) {
+		DHD_ERROR(("%s: address (0x%08x) of sdpcm_shared invalid\n", __FUNCTION__, addr));
+		return BCME_ERROR;
+	}
+
+	/* Read hndrte_shared structure */
+	if ((rv = dhdsdio_membytes(bus, FALSE, addr, (uint8 *)sh, sizeof(sdpcm_shared_t))) < 0)
+		return rv;
+
+	/* Endianness */
+	sh->flags = ltoh32(sh->flags);
+	sh->trap_addr = ltoh32(sh->trap_addr);
+	sh->assert_exp_addr = ltoh32(sh->assert_exp_addr);
+	sh->assert_file_addr = ltoh32(sh->assert_file_addr);
+	sh->assert_line = ltoh32(sh->assert_line);
+	sh->console_addr = ltoh32(sh->console_addr);
+	sh->msgtrace_addr = ltoh32(sh->msgtrace_addr);
+
+	if ((sh->flags & SDPCM_SHARED_VERSION_MASK) != SDPCM_SHARED_VERSION) {
+		DHD_ERROR(("%s: sdpcm_shared version %d in dhd "
+		           "is different than sdpcm_shared version %d in dongle\n",
+		           __FUNCTION__, SDPCM_SHARED_VERSION,
+		           sh->flags & SDPCM_SHARED_VERSION_MASK));
+		return BCME_ERROR;
+	}
+
+	return BCME_OK;
+}
+
+static int
+dhdsdio_checkdied(dhd_bus_t *bus, uint8 *data, uint size)
+{
+	int bcmerror = 0;
+	uint msize = 512;
+	char *mbuffer = NULL;
+	uint maxstrlen = 256;
+	char *str = NULL;
+	trap_t tr;
+	sdpcm_shared_t sdpcm_shared;
+	struct bcmstrbuf strbuf;
+
+	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
+
+	if (data == NULL) {
+		/*
+		 * Called after a rx ctrl timeout. "data" is NULL.
+		 * allocate memory to trace the trap or assert.
+		 */
+		size = msize;
+		mbuffer = data = MALLOC(bus->dhd->osh, msize);
+		if (mbuffer == NULL) {
+			DHD_ERROR(("%s: MALLOC(%d) failed \n", __FUNCTION__, msize));
+			bcmerror = BCME_NOMEM;
+			goto done;
+		}
+	}
+
+	if ((str = MALLOC(bus->dhd->osh, maxstrlen)) == NULL) {
+		DHD_ERROR(("%s: MALLOC(%d) failed \n", __FUNCTION__, maxstrlen));
+		bcmerror = BCME_NOMEM;
+		goto done;
+	}
+
+	if ((bcmerror = dhdsdio_readshared(bus, &sdpcm_shared)) < 0)
+		goto done;
+
+	bcm_binit(&strbuf, data, size);
+
+	bcm_bprintf(&strbuf, "msgtrace address : 0x%08X\nconsole address  : 0x%08X\n",
+	            sdpcm_shared.msgtrace_addr, sdpcm_shared.console_addr);
+
+	if ((sdpcm_shared.flags & SDPCM_SHARED_ASSERT_BUILT) == 0) {
+		/* NOTE: Misspelled assert is intentional - DO NOT FIX.
+		 * (Avoids conflict with real asserts for programmatic parsing of output.)
+		 */
+		bcm_bprintf(&strbuf, "Assrt not built in dongle\n");
+	}
+
+	if ((sdpcm_shared.flags & (SDPCM_SHARED_ASSERT|SDPCM_SHARED_TRAP)) == 0) {
+		/* NOTE: Misspelled assert is intentional - DO NOT FIX.
+		 * (Avoids conflict with real asserts for programmatic parsing of output.)
+		 */
+		bcm_bprintf(&strbuf, "No trap%s in dongle",
+		          (sdpcm_shared.flags & SDPCM_SHARED_ASSERT_BUILT)
+		          ?"/assrt" :"");
+	} else {
+		if (sdpcm_shared.flags & SDPCM_SHARED_ASSERT) {
+			/* Download assert */
+			bcm_bprintf(&strbuf, "Dongle assert");
+			if (sdpcm_shared.assert_exp_addr != 0) {
+				str[0] = '\0';
+				if ((bcmerror = dhdsdio_membytes(bus, FALSE,
+				                                 sdpcm_shared.assert_exp_addr,
+				                                 (uint8 *)str, maxstrlen)) < 0)
+					goto done;
+
+				str[maxstrlen - 1] = '\0';
+				bcm_bprintf(&strbuf, " expr \"%s\"", str);
+			}
+
+			if (sdpcm_shared.assert_file_addr != 0) {
+				str[0] = '\0';
+				if ((bcmerror = dhdsdio_membytes(bus, FALSE,
+				                                 sdpcm_shared.assert_file_addr,
+				                                 (uint8 *)str, maxstrlen)) < 0)
+					goto done;
+
+				str[maxstrlen - 1] = '\0';
+				bcm_bprintf(&strbuf, " file \"%s\"", str);
+			}
+
+			bcm_bprintf(&strbuf, " line %d ", sdpcm_shared.assert_line);
+		}
+
+		if (sdpcm_shared.flags & SDPCM_SHARED_TRAP) {
+			if ((bcmerror = dhdsdio_membytes(bus, FALSE,
+			                                 sdpcm_shared.trap_addr,
+			                                 (uint8*)&tr, sizeof(trap_t))) < 0)
+				goto done;
+
+			bcm_bprintf(&strbuf,
+			"Dongle trap type 0x%x @ epc 0x%x, cpsr 0x%x, spsr 0x%x, sp 0x%x,"
+			"lp 0x%x, rpc 0x%x Trap offset 0x%x, "
+			"r0 0x%x, r1 0x%x, r2 0x%x, r3 0x%x, r4 0x%x, r5 0x%x, r6 0x%x, r7 0x%x\n",
+			tr.type, tr.epc, tr.cpsr, tr.spsr, tr.r13, tr.r14, tr.pc,
+			sdpcm_shared.trap_addr,
+			tr.r0, tr.r1, tr.r2, tr.r3, tr.r4, tr.r5, tr.r6, tr.r7);
+		}
+	}
+
+	if (sdpcm_shared.flags & (SDPCM_SHARED_ASSERT | SDPCM_SHARED_TRAP)) {
+		DHD_ERROR(("%s: %s\n", __FUNCTION__, strbuf.origbuf));
+	}
+
+done:
+	if (mbuffer)
+		MFREE(bus->dhd->osh, mbuffer, msize);
+	if (str)
+		MFREE(bus->dhd->osh, str, maxstrlen);
+
+	return bcmerror;
+}
 
 int
 dhdsdio_downloadvars(dhd_bus_t *bus, void *arg, int len)
@@ -3772,7 +3895,6 @@ dhdsdio_hostmail(dhd_bus_t *bus)
 	return intstatus;
 }
 
-static int dhdsdio_regfail = 0;
 bool
 dhdsdio_dpc(dhd_bus_t *bus)
 {
@@ -3804,8 +3926,9 @@ dhdsdio_dpc(dhd_bus_t *bus)
 		if (err) {
 			DHD_ERROR(("%s: error reading DEVCTL: %d\n", __FUNCTION__, err));
 			bus->dhd->busstate = DHD_BUS_DOWN;
+		} else {
+			ASSERT(devctl & SBSDIO_DEVCTL_CA_INT_ONLY);
 		}
-		ASSERT(devctl & SBSDIO_DEVCTL_CA_INT_ONLY);
 #endif /* DHD_DEBUG */
 
 		/* Read CSR, if clock on switch to AVAIL, else ignore */
@@ -3979,14 +4102,9 @@ clkwait:
 	/* Resched if events or tx frames are pending, else await next interrupt */
 	/* On failed register access, all bets are off: no resched or interrupts */
 	if ((bus->dhd->busstate == DHD_BUS_DOWN) || bcmsdh_regfail(sdh)) {
-		DHD_ERROR(("%s: failed backplane access over SDIO, halting operation\n",
-		           __FUNCTION__));
-		if (bcmsdh_regfail(sdh)) {
-			if (++dhdsdio_regfail > 5) {
-				dhdsdio_regfail = 0;
-				bus->dhd->busstate = DHD_BUS_DOWN;
-			}
-		}
+		DHD_ERROR(("%s: failed backplane access over SDIO, halting operation %d \n",
+		           __FUNCTION__, bcmsdh_regfail(sdh)));
+		bus->dhd->busstate = DHD_BUS_DOWN;
 		bus->intstatus = 0;
 	} else if (bus->clkstate == CLK_PENDING) {
 		/* Awaiting I_CHIPACTIVE; don't resched */
@@ -3996,9 +4114,7 @@ clkwait:
 		resched = TRUE;
 	}
 
-	if (!bcmsdh_regfail(sdh)) {
-		dhdsdio_regfail = 0;
-	}
+
 	bus->dpc_sched = resched;
 
 	/* If we're done for now, turn off clock request. */
@@ -4032,7 +4148,13 @@ void
 dhdsdio_isr(void *arg)
 {
 	dhd_bus_t *bus = (dhd_bus_t*)arg;
-	bcmsdh_info_t *sdh = bus->sdh;
+	bcmsdh_info_t *sdh;
+
+	if (!bus) {
+		DHD_ERROR(("%s : bus is null pointer , exit \n", __FUNCTION__));
+		return;
+	}
+	sdh = bus->sdh;
 
 	if (bus->dhd->busstate == DHD_BUS_DOWN) {
 		DHD_ERROR(("%s : bus is down. we have nothing to do\n", __FUNCTION__));
@@ -4580,12 +4702,16 @@ dhdsdio_probe(uint16 venid, uint16 devid, uint16 bus_no, uint16 slot,
 
 
 	/* if firmware path present try to download and bring up bus */
-	if ((ret = dhd_bus_start(bus->dhd)) == -1) {
-		DHD_TRACE(("%s: warning : check if firmware was provided\n", __FUNCTION__));
-	}
-	else if (ret == BCME_NOTUP)  {
-		DHD_ERROR(("%s: dongle is not responding\n", __FUNCTION__));
+	if ((ret = dhd_bus_start(bus->dhd)) != 0) {
+#if 1
+		DHD_ERROR(("%s: failed\n", __FUNCTION__));
 		goto fail;
+#else
+		if (ret == BCME_NOTUP)  {
+			DHD_ERROR(("%s: dongle is not responding\n", __FUNCTION__));
+			goto fail;
+		}
+#endif
 	}
 	/* Ok, have the per-port tell the stack we're open for business */
 	if (dhd_net_attach(bus->dhd, 0) != 0) {
@@ -4915,6 +5041,10 @@ dhdsdio_release(dhd_bus_t *bus, osl_t *osh)
 		ASSERT(osh);
 
 
+		/* De-register interrupt handler */
+		bcmsdh_intr_disable(bus->sdh);
+		bcmsdh_intr_dereg(bus->sdh);
+
 		if (bus->dhd) {
 
 			dhdsdio_release_dongle(bus, osh);
@@ -4924,9 +5054,6 @@ dhdsdio_release(dhd_bus_t *bus, osl_t *osh)
 		}
 
 		dhdsdio_release_malloc(bus, osh);
-
-		/* De-register interrupt handler */
-		bcmsdh_intr_dereg(bus->sdh);
 
 
 		MFREE(osh, bus, sizeof(dhd_bus_t));
@@ -5422,8 +5549,8 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 			/* Force flow control as protection when stop come before ifconfig_down */
 			dhd_txflowcontrol(bus->dhd, 0, ON);
 #endif /* !defined(IGNORE_ETH0_DOWN) */
-			dhd_os_proto_block(dhdp);
 			/* save country settinng if was pre-setup with priv ioctl */
+			dhd_os_proto_block(dhdp);
 			dhdcdc_query_ioctl(bus->dhd, 0, WLC_GET_COUNTRY,
 				bus->dhd->country_code, sizeof(bus->dhd->country_code));
 			dhd_os_proto_unblock(dhdp);

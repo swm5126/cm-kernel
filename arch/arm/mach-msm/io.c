@@ -38,24 +38,37 @@
 static struct map_desc msm_io_desc[] __initdata = {
 	MSM_DEVICE(VIC),
 	MSM_DEVICE(CSR),
+#ifdef CONFIG_ARCH_MSM7X30
+	MSM_DEVICE(TMR),
+#else
 	MSM_DEVICE(GPT),
+#endif
 	MSM_DEVICE(DMOV),
 	MSM_DEVICE(GPIO1),
 	MSM_DEVICE(GPIO2),
 	MSM_DEVICE(CLK_CTL),
+#ifdef CONFIG_ARCH_MSM7X30
+	MSM_DEVICE(CLK_CTL_SH2),
+#endif
 #ifdef CONFIG_ARCH_MSM7227
 	MSM_DEVICE(TGPIO1),
 #endif
-#ifdef CONFIG_ARCH_MSM_SCORPION
+#ifdef CONFIG_ARCH_QSD8X50
 	MSM_DEVICE(SIRC),
 	MSM_DEVICE(SCPLL),
 #endif
 	MSM_DEVICE(AD5),
 	MSM_DEVICE(MDC),
+#ifdef CONFIG_ARCH_MSM7X30
+	MSM_DEVICE(ACC),
+	MSM_DEVICE(SAW),
+	MSM_DEVICE(GCC),
+	MSM_DEVICE(TCSR),
+#endif
 #ifdef CONFIG_MSM_DEBUG_UART
 	MSM_DEVICE(DEBUG_UART),
 #endif
-#ifdef CONFIG_ARCH_MSM_SCORPION
+#ifdef CONFIG_ARCH_QSD8X50
 	MSM_DEVICE(TCSR),
 #endif
 #ifdef CONFIG_CACHE_L2X0
@@ -95,7 +108,7 @@ void __init msm_map_common_io(void)
 		      "mcr p15, 0, %0, c15, c15, 2"
 		      : "=&r" (unused));
 #endif
-#ifdef CONFIG_ARCH_MSM_SCORPION
+#ifdef CONFIG_ARCH_QSD8X50
 	/* clear out EFSR and ADFSR on boot */
 	asm volatile ("mcr p15, 7, %0, c15, c0, 1\n\t"
 		      "mcr p15, 0, %0, c5, c1, 0"

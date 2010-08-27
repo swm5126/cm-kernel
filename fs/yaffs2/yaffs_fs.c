@@ -720,25 +720,27 @@ static int yaffs_readpage_nolock(struct file *f, struct page *pg)
 	yaffs_Object *obj;
 	unsigned char *pg_buf;
 	int ret;
-	static char buf_src[buffsize],buf_dest[buffsize];
-	static int no=1;
-	yaffs_Device *dev;
 
-	if (yaffs_traceMask & YAFFS_TRACE_HTC_DEBUG) {
-		snprintf(buf_src,buffsize,"%d,%s,%s\n",(unsigned)(current->pid), current->comm, f->f_dentry->d_name.name);
-		if ( !memcmp(buf_src,buf_dest, sizeof(buf_src)>buffsize?sizeof(buf_src):buffsize) )
-			no++;
-		else
-		{
-			pr_info("[YAFFS]%d,%s",no,buf_dest);
-			memcpy(buf_dest,buf_src, sizeof(buf_src)>buffsize?sizeof(buf_src):buffsize);
-			no=1;
-		}
-	}
+	static char buf_src[buffsize], buf_dest[buffsize];
+	static int no = 1;
+
+	yaffs_Device *dev;
 
 	T(YAFFS_TRACE_OS, ("yaffs_readpage at %08x, size %08x\n",
 			(unsigned)(pg->index << PAGE_CACHE_SHIFT),
 			(unsigned)PAGE_CACHE_SIZE));
+
+	if (yaffs_traceMask & YAFFS_TRACE_HTC_DEBUG) {
+		snprintf(buf_src, buffsize, "%d, %s, %s\n", \
+			(unsigned)(current->pid), current->comm, f->f_dentry->d_name.name);
+		if (!memcmp(buf_src, buf_dest, sizeof(buf_src) > buffsize?sizeof(buf_src):buffsize)) {
+			no++;
+		} else {
+			pr_info("[YAFFS] %d, %s", no, buf_dest);
+			memcpy(buf_dest, buf_src, sizeof(buf_src) > buffsize?sizeof(buf_src):buffsize);
+			no = 1;
+		}
+	}
 
 	obj = yaffs_DentryToObject(f->f_dentry);
 
@@ -2099,7 +2101,7 @@ static struct super_block *yaffs_internal_read_super(int yaffsVersion,
 #ifdef CONFIG_YAFFS_EMPTY_LOST_AND_FOUND
 	dev->emptyLostAndFound = 1;
 #endif
-	if (options.empty_lost_and_found_overridden)
+	if(options.empty_lost_and_found_overridden)
 		dev->emptyLostAndFound = options.empty_lost_and_found;
 
 #ifdef CONFIG_YAFFS_AUTO_YAFFS2

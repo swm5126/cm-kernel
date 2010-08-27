@@ -71,12 +71,9 @@ static int msm_cpufreq_target(struct cpufreq_policy *policy,
 	freqs.new = table[index].frequency;
 	freqs.cpu = smp_processor_id();
 	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
-	if (!acpuclk_set_rate(table[index].frequency * 1000, 0)) {
-        cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
-        return 0;
-    } else {
-		return -EINVAL;
-    }
+	acpuclk_set_rate(table[index].frequency * 1000, 0);
+	cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
+	return 0;
 }
 
 static int msm_cpufreq_verify(struct cpufreq_policy *policy)
@@ -93,15 +90,15 @@ static int __init msm_cpufreq_init(struct cpufreq_policy *policy)
 
 	BUG_ON(cpufreq_frequency_table_cpuinfo(policy, table));
 	policy->cur = acpuclk_get_rate();
-#if 0
-	/* restrict cpu freq scaling range by overwriting */
-	policy->min = CONFIG_MSM_CPU_FREQ_ONDEMAND_MIN;
-	policy->max = CONFIG_MSM_CPU_FREQ_ONDEMAND_MAX;
-#endif
 	policy->cpuinfo.transition_latency =
 		acpuclk_get_switch_time() * NSEC_PER_USEC;
 	return 0;
 }
+
+static struct freq_attr *msm_cpufreq_attr[] = {
+	&cpufreq_freq_attr_scaling_available_freqs,
+	NULL,
+};
 
 static struct cpufreq_driver msm_cpufreq_driver = {
 	/* lps calculations are handled here. */
@@ -110,6 +107,7 @@ static struct cpufreq_driver msm_cpufreq_driver = {
 	.verify		= msm_cpufreq_verify,
 	.target		= msm_cpufreq_target,
 	.name		= "msm",
+	.attr		= msm_cpufreq_attr,
 };
 
 static int __init msm_cpufreq_register(void)

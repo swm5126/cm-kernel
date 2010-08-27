@@ -87,20 +87,20 @@ struct ll_struct {
 	struct sk_buff_head tx_wait_q;	/* HCILL wait queue	*/
 };
 
-#ifdef CONFIG_SERIAL_MSM_HS
+#if 0	/*#ifdef CONFIG_SERIAL_MSM_HS */
 void msm_hs_request_clock_off(struct uart_port *uport);
 void msm_hs_request_clock_on(struct uart_port *uport);
 
 static void __ll_msm_serial_clock_on(struct tty_struct *tty) {
 	struct uart_state *state = tty->driver_data;
-	struct uart_port *port = state->port;
+	struct uart_port *port = state->uart_port;
 
 	msm_hs_request_clock_on(port);
 }
 
 static void __ll_msm_serial_clock_request_off(struct tty_struct *tty) {
 	struct uart_state *state = tty->driver_data;
-	struct uart_port *port = state->port;
+	struct uart_port *port = state->uart_port;
 
 	msm_hs_request_clock_off(port);
 }

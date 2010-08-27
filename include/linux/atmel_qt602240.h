@@ -36,7 +36,7 @@
 #define SPT_GATE_T30                              30u
 #define TOUCH_KEYSET_T31                          31u
 #define TOUCH_XSLIDERSET_T32                      32u
-
+#define DIAGNOSTIC_T37			37u
 struct info_id_t {
 	uint8_t family_id;
 	uint8_t variant_id;
@@ -71,6 +71,7 @@ struct atmel_finger_data {
 
 struct atmel_i2c_platform_data {
 	uint16_t version;
+	uint16_t source;
 	uint16_t abs_x_min;
 	uint16_t abs_x_max;
 	uint16_t abs_y_min;
@@ -80,22 +81,11 @@ struct atmel_i2c_platform_data {
 	uint8_t abs_width_min;
 	uint8_t abs_width_max;
 	int gpio_irq;
-	int mach_type;
 	int (*power)(int on);
-	const char *input_name;
-	uint16_t key_type;
-	struct atmel_virtual_key *virtual_key;
-	uint8_t virtual_key_num;
-	uint8_t inactive_left;
-	uint8_t inactive_right;
-	uint8_t inactive_top;
-	uint8_t inactive_bottom;
-	uint16_t gap_area;
-	uint16_t key_area;
 	int8_t config_T6[6];
 	int8_t config_T7[3];
 	int8_t config_T8[8];
-	int8_t config_T9[30];
+	int8_t config_T9[31];
 	int8_t config_T15[11];
 	int8_t config_T19[12];
 	int8_t config_T20[12];
@@ -106,7 +96,23 @@ struct atmel_i2c_platform_data {
 	int8_t config_T27[7];
 	int8_t config_T28[6];
 	uint8_t object_crc[3];
+	int8_t cable_config[4];
+	int8_t cable_config_T7[3];
+	int8_t cable_config_T8[8];
+	int8_t cable_config_T9[31];
+	int8_t cable_config_T22[17];
+	int8_t cable_config_T28[6];
 	uint16_t filter_level[4];
+	uint8_t GCAF_level[5];
+};
+
+struct atmel_config_data {
+	int8_t config[4];
+	int8_t *config_T7;
+	int8_t *config_T8;
+	int8_t *config_T9;
+	int8_t *config_T22;
+	int8_t *config_T28;
 };
 
 #endif

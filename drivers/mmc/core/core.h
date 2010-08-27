@@ -16,10 +16,14 @@
 #define MMC_CMD_RETRIES        3
 
 struct mmc_bus_ops {
+	int (*awake)(struct mmc_host *);
+	int (*sleep)(struct mmc_host *);
 	void (*remove)(struct mmc_host *);
 	void (*detect)(struct mmc_host *);
-	void (*suspend)(struct mmc_host *);
-	void (*resume)(struct mmc_host *);
+	int (*suspend)(struct mmc_host *);
+	int (*resume)(struct mmc_host *);
+	void (*power_save)(struct mmc_host *);
+	void (*power_restore)(struct mmc_host *);
 };
 
 void mmc_attach_bus(struct mmc_host *host, const struct mmc_bus_ops *ops);
@@ -38,7 +42,7 @@ static inline void mmc_delay(unsigned int ms)
 		cond_resched();
 		mdelay(ms);
 	} else {
-		mdelay(ms);
+		msleep(ms);
 	}
 }
 
@@ -58,8 +62,6 @@ void mmc_remove_host_debugfs(struct mmc_host *host);
 
 void mmc_add_card_debugfs(struct mmc_card *card);
 void mmc_remove_card_debugfs(struct mmc_card *card);
-void mmc_power_up(struct mmc_host *host);
-void mmc_power_off(struct mmc_host *host);
 
 #endif
 

@@ -17,7 +17,7 @@
 
 struct cnf_driver {
 	const char		*name;
-	int (*func)           	(int);
+	int (*func)		(void *);
 
 	/* configurable driver list lock */
 	rwlock_t		cnfdrv_list_lock;

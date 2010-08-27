@@ -32,6 +32,9 @@
 #define RPCROUTER_VERSION			1
 #define RPCROUTER_PROCESSORS_MAX		4
 #define RPCROUTER_MSGSIZE_MAX			512
+#if defined(CONFIG_ARCH_MSM7X30)
+#define RPCROUTER_PEND_REPLIES_MAX		32
+#endif
 
 #define RPCROUTER_CLIENT_BCAST_ID		0xffffffff
 #define RPCROUTER_ROUTER_ADDRESS		0xfffffffe
@@ -129,11 +132,25 @@ struct rr_remote_endpoint {
 	uint32_t cid;
 
 	int tx_quota_cntr;
+#if defined(CONFIG_ARCH_MSM7X30)
+	int quota_restart_state;
+#endif
 	spinlock_t quota_lock;
 	wait_queue_head_t quota_wait;
 
 	struct list_head list;
 };
+
+#if defined(CONFIG_ARCH_MSM7X30)
+struct msm_rpc_reply {
+	struct list_head list;
+	uint32_t pid;
+	uint32_t cid;
+	uint32_t prog; /* be32 */
+	uint32_t vers; /* be32 */
+	uint32_t xid; /* be32 */
+};
+#endif
 
 struct msm_rpc_endpoint {
 	struct list_head list;
@@ -147,7 +164,12 @@ struct msm_rpc_endpoint {
 	struct wake_lock read_q_wake_lock;
 	wait_queue_head_t wait_q;
 	unsigned flags;
-
+#if defined(CONFIG_ARCH_MSM7X30)
+	/* restart handling */
+	int restart_state;
+	spinlock_t restart_lock;
+	wait_queue_head_t restart_wait;
+#endif
 	/* endpoint address */
 	uint32_t pid;
 	uint32_t cid;
@@ -171,6 +193,14 @@ struct msm_rpc_endpoint {
 	uint32_t reply_xid; /* be32 */
 	uint32_t next_pm;   /* Pacmark sequence */
 
+#if defined(CONFIG_ARCH_MSM7X30)
+	/* reply queue for inbound messages */
+	struct list_head reply_pend_q;
+	struct list_head reply_avail_q;
+	spinlock_t reply_q_lock;
+	uint32_t reply_cnt;
+	struct wake_lock reply_q_wake_lock;
+#endif
 	/* device node if this endpoint is accessed via userspace */
 	dev_t dev;
 };
@@ -181,6 +211,7 @@ int __msm_rpc_read(struct msm_rpc_endpoint *ept,
 		   struct rr_fragment **frag,
 		   unsigned len, long timeout);
 
+int msm_rpcrouter_close(void);
 struct msm_rpc_endpoint *msm_rpcrouter_create_local_endpoint(dev_t dev);
 int msm_rpcrouter_destroy_local_endpoint(struct msm_rpc_endpoint *ept);
 
@@ -190,6 +221,18 @@ int msm_rpcrouter_create_server_pdev(struct rr_server *server);
 int msm_rpcrouter_init_devices(void);
 void msm_rpcrouter_exit_devices(void);
 
+#if defined(CONFIG_ARCH_MSM7X30)
+void get_requesting_client(struct msm_rpc_endpoint *ept, uint32_t xid,
+			   struct msm_rpc_client_info *clnt_info);
+#endif
+
 extern dev_t msm_rpcrouter_devno;
 extern struct class *msm_rpcrouter_class;
+
+void xdr_init(struct msm_rpc_xdr *xdr);
+void xdr_init_input(struct msm_rpc_xdr *xdr, void *buf, uint32_t size);
+void xdr_init_output(struct msm_rpc_xdr *xdr, void *buf, uint32_t size);
+void xdr_clean_input(struct msm_rpc_xdr *xdr);
+void xdr_clean_output(struct msm_rpc_xdr *xdr);
+uint32_t xdr_read_avail(struct msm_rpc_xdr *xdr);
 #endif

@@ -43,19 +43,38 @@ static int msm_irq_debug_mask;
 module_param_named(debug_mask, msm_irq_debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
 
 #define VIC_REG(off) (MSM_VIC_BASE + (off))
+#if defined(CONFIG_ARCH_MSM7X30)
+#define VIC_INT_TO_REG_ADDR(base, irq) (base + (irq / 32) * 4)
+#define VIC_INT_TO_REG_INDEX(irq) ((irq >> 5) & 3)
+#else
+#define VIC_INT_TO_REG_ADDR(base, irq) (base + ((irq & 32) ? 4 : 0))
+#define VIC_INT_TO_REG_INDEX(irq) ((irq >> 5) & 1)
+#endif
 
 #define VIC_INT_SELECT0     VIC_REG(0x0000)  /* 1: FIQ, 0: IRQ */
 #define VIC_INT_SELECT1     VIC_REG(0x0004)  /* 1: FIQ, 0: IRQ */
+#define VIC_INT_SELECT2     VIC_REG(0x0008)  /* 1: FIQ, 0: IRQ */
+#define VIC_INT_SELECT3     VIC_REG(0x000C)  /* 1: FIQ, 0: IRQ */
 #define VIC_INT_EN0         VIC_REG(0x0010)
 #define VIC_INT_EN1         VIC_REG(0x0014)
+#define VIC_INT_EN2         VIC_REG(0x0018)
+#define VIC_INT_EN3         VIC_REG(0x001C)
 #define VIC_INT_ENCLEAR0    VIC_REG(0x0020)
 #define VIC_INT_ENCLEAR1    VIC_REG(0x0024)
+#define VIC_INT_ENCLEAR2    VIC_REG(0x0028)
+#define VIC_INT_ENCLEAR3    VIC_REG(0x002C)
 #define VIC_INT_ENSET0      VIC_REG(0x0030)
 #define VIC_INT_ENSET1      VIC_REG(0x0034)
+#define VIC_INT_ENSET2      VIC_REG(0x0038)
+#define VIC_INT_ENSET3      VIC_REG(0x003C)
 #define VIC_INT_TYPE0       VIC_REG(0x0040)  /* 1: EDGE, 0: LEVEL  */
 #define VIC_INT_TYPE1       VIC_REG(0x0044)  /* 1: EDGE, 0: LEVEL  */
+#define VIC_INT_TYPE2       VIC_REG(0x0048)  /* 1: EDGE, 0: LEVEL  */
+#define VIC_INT_TYPE3       VIC_REG(0x004C)  /* 1: EDGE, 0: LEVEL  */
 #define VIC_INT_POLARITY0   VIC_REG(0x0050)  /* 1: NEG, 0: POS */
 #define VIC_INT_POLARITY1   VIC_REG(0x0054)  /* 1: NEG, 0: POS */
+#define VIC_INT_POLARITY2   VIC_REG(0x0058)  /* 1: NEG, 0: POS */
+#define VIC_INT_POLARITY3   VIC_REG(0x005C)  /* 1: NEG, 0: POS */
 #define VIC_NO_PEND_VAL     VIC_REG(0x0060)
 
 #if defined(CONFIG_ARCH_MSM_SCORPION)
@@ -69,14 +88,24 @@ module_param_named(debug_mask, msm_irq_debug_mask, int, S_IRUGO | S_IWUSR | S_IW
 #endif
 #define VIC_IRQ_STATUS0     VIC_REG(0x0080)
 #define VIC_IRQ_STATUS1     VIC_REG(0x0084)
+#define VIC_IRQ_STATUS2     VIC_REG(0x0088)
+#define VIC_IRQ_STATUS3     VIC_REG(0x008C)
 #define VIC_FIQ_STATUS0     VIC_REG(0x0090)
 #define VIC_FIQ_STATUS1     VIC_REG(0x0094)
+#define VIC_FIQ_STATUS2     VIC_REG(0x0098)
+#define VIC_FIQ_STATUS3     VIC_REG(0x009C)
 #define VIC_RAW_STATUS0     VIC_REG(0x00A0)
 #define VIC_RAW_STATUS1     VIC_REG(0x00A4)
+#define VIC_RAW_STATUS2     VIC_REG(0x00A8)
+#define VIC_RAW_STATUS3     VIC_REG(0x00AC)
 #define VIC_INT_CLEAR0      VIC_REG(0x00B0)
 #define VIC_INT_CLEAR1      VIC_REG(0x00B4)
+#define VIC_INT_CLEAR2      VIC_REG(0x00B8)
+#define VIC_INT_CLEAR3      VIC_REG(0x00BC)
 #define VIC_SOFTINT0        VIC_REG(0x00C0)
 #define VIC_SOFTINT1        VIC_REG(0x00C4)
+#define VIC_SOFTINT2        VIC_REG(0x00C8)
+#define VIC_SOFTINT3        VIC_REG(0x00CC)
 #define VIC_IRQ_VEC_RD      VIC_REG(0x00D0)  /* pending int # */
 #define VIC_IRQ_VEC_PEND_RD VIC_REG(0x00D4)  /* pending vector addr */
 #define VIC_IRQ_VEC_WR      VIC_REG(0x00D8)
@@ -100,14 +129,40 @@ module_param_named(debug_mask, msm_irq_debug_mask, int, S_IRUGO | S_IWUSR | S_IW
 #define VIC_VECTPRIORITY(n) VIC_REG(0x0200+((n) * 4))
 #define VIC_VECTADDR(n)     VIC_REG(0x0400+((n) * 4))
 
+#if defined(CONFIG_ARCH_MSM7X30)
+#define VIC_NUM_REGS	    4
+#else
+#define VIC_NUM_REGS	    2
+#endif
+
+#if VIC_NUM_REGS == 2
+#define DPRINT_REGS(base_reg, format, ...)	      			\
+	printk(KERN_INFO format " %x %x\n", ##__VA_ARGS__,		\
+			readl(base_reg ## 0), readl(base_reg ## 1))
+#define DPRINT_ARRAY(array, format, ...)				\
+	printk(KERN_INFO format " %x %x\n", ##__VA_ARGS__,		\
+			array[0], array[1])
+#elif VIC_NUM_REGS == 4
+#define DPRINT_REGS(base_reg, format, ...) \
+	printk(KERN_INFO format " %x %x %x %x\n", ##__VA_ARGS__,	\
+			readl(base_reg ## 0), readl(base_reg ## 1),	\
+			readl(base_reg ## 2), readl(base_reg ## 3))
+#define DPRINT_ARRAY(array, format, ...)				\
+	printk(KERN_INFO format " %x %x %x %x\n", ##__VA_ARGS__,	\
+			array[0], array[1],				\
+			array[2], array[3])
+#else
+#error "VIC_NUM_REGS set to illegal value"
+#endif
+
 static uint32_t msm_irq_smsm_wake_enable[2];
 static struct {
 	uint32_t int_en[2];
 	uint32_t int_type;
 	uint32_t int_polarity;
 	uint32_t int_select;
-} msm_irq_shadow_reg[2];
-static uint32_t msm_irq_idle_disable[2];
+} msm_irq_shadow_reg[VIC_NUM_REGS];
+static uint32_t msm_irq_idle_disable[VIC_NUM_REGS];
 
 #if defined(CONFIG_MSM_N_WAY_SMD)
 #define INT_INFO_SMSM_ID SMEM_APPS_DEM_SLAVE_DATA
@@ -143,7 +198,9 @@ static uint8_t msm_irq_to_smsm[NR_MSM_IRQS + NR_SIRC_IRQS] = {
 	[INT_UART1DM_IRQ] = 17,
 	[INT_UART1DM_RX] = 18,
 	[INT_KEYSENSE] = 19,
+#if !defined(CONFIG_ARCH_MSM7X30)
 	[INT_AD_HSSD] = 20,
+#endif
 
 	[INT_NAND_WR_ER_DONE] = 21,
 	[INT_NAND_OP_DONE] = 22,
@@ -169,23 +226,31 @@ static uint8_t msm_irq_to_smsm[NR_MSM_IRQS + NR_SIRC_IRQS] = {
 	[INT_GP_TIMER_EXP] = SMSM_FAKE_IRQ,
 	[INT_DEBUG_TIMER_EXP] = SMSM_FAKE_IRQ,
 	[INT_ADSP_A11] = SMSM_FAKE_IRQ,
-#ifdef CONFIG_ARCH_MSM_SCORPION
+#ifdef CONFIG_ARCH_QSD8X50
 	[INT_SIRC_0] = SMSM_FAKE_IRQ,
 	[INT_SIRC_1] = SMSM_FAKE_IRQ,
 #endif
 };
 
+static inline void msm_irq_write_all_regs(void __iomem *base, unsigned int val)
+{
+	int i;
+	/* the address must be continue */
+	for (i = 0; i < VIC_NUM_REGS; i++)
+		writel(val, base + (i * 4));
+}
+
 static void msm_irq_ack(unsigned int irq)
 {
-	void __iomem *reg = VIC_INT_CLEAR0 + ((irq & 32) ? 4 : 0);
+	void __iomem *reg = VIC_INT_TO_REG_ADDR(VIC_INT_CLEAR0, irq);
 	irq = 1 << (irq & 31);
 	writel(irq, reg);
 }
 
 static void msm_irq_mask(unsigned int irq)
 {
-	void __iomem *reg = VIC_INT_ENCLEAR0 + ((irq & 32) ? 4 : 0);
-	unsigned index = (irq >> 5) & 1;
+	void __iomem *reg = VIC_INT_TO_REG_ADDR(VIC_INT_ENCLEAR0, irq);
+	unsigned index = VIC_INT_TO_REG_INDEX(irq);
 	uint32_t mask = 1UL << (irq & 31);
 	int smsm_irq = msm_irq_to_smsm[irq];
 
@@ -201,8 +266,8 @@ static void msm_irq_mask(unsigned int irq)
 
 static void msm_irq_unmask(unsigned int irq)
 {
-	void __iomem *reg = VIC_INT_ENSET0 + ((irq & 32) ? 4 : 0);
-	unsigned index = (irq >> 5) & 1;
+	void __iomem *reg = VIC_INT_TO_REG_ADDR(VIC_INT_ENSET0, irq);
+	unsigned index = VIC_INT_TO_REG_INDEX(irq);
 	uint32_t mask = 1UL << (irq & 31);
 	int smsm_irq = msm_irq_to_smsm[irq];
 
@@ -219,7 +284,7 @@ static void msm_irq_unmask(unsigned int irq)
 
 static int msm_irq_set_wake(unsigned int irq, unsigned int on)
 {
-	unsigned index = (irq >> 5) & 1;
+	unsigned index = VIC_INT_TO_REG_INDEX(irq);
 	uint32_t mask = 1UL << (irq & 31);
 	int smsm_irq = msm_irq_to_smsm[irq];
 
@@ -245,9 +310,9 @@ static int msm_irq_set_wake(unsigned int irq, unsigned int on)
 
 static int msm_irq_set_type(unsigned int irq, unsigned int flow_type)
 {
-	void __iomem *treg = VIC_INT_TYPE0 + ((irq & 32) ? 4 : 0);
-	void __iomem *preg = VIC_INT_POLARITY0 + ((irq & 32) ? 4 : 0);
-	unsigned index = (irq >> 5) & 1;
+	void __iomem *treg = VIC_INT_TO_REG_ADDR(VIC_INT_TYPE0, irq);
+	void __iomem *preg = VIC_INT_TO_REG_ADDR(VIC_INT_POLARITY0, irq);
+	unsigned index = VIC_INT_TO_REG_INDEX(irq);
 	int b = 1 << (irq & 31);
 	uint32_t polarity;
 	uint32_t type;
@@ -276,16 +341,24 @@ static int msm_irq_set_type(unsigned int irq, unsigned int flow_type)
 
 int msm_irq_pending(void)
 {
-	return readl(VIC_IRQ_STATUS0) || readl(VIC_IRQ_STATUS1);
+	int i, pending = 0;
+	/* the address must be continue */
+	for (i = 0; (i < VIC_NUM_REGS) && !pending; i++)
+		pending |= readl(VIC_IRQ_STATUS0 + (i * 4));
+
+	return pending;
 }
 
 int msm_irq_idle_sleep_allowed(void)
 {
+	int i, disable = 0;
+
 	if (msm_irq_debug_mask & IRQ_DEBUG_SLEEP_REQUEST)
-		printk(KERN_INFO "msm_irq_idle_sleep_allowed: disable %x %x\n",
-		msm_irq_idle_disable[0], msm_irq_idle_disable[1]);
-	return !(msm_irq_idle_disable[0] || msm_irq_idle_disable[1] ||
-		 !smsm_int_info);
+		DPRINT_ARRAY(msm_irq_idle_disable,
+			     "msm_irq_idle_sleep_allowed: disable");
+	for (i = 0; i < VIC_NUM_REGS; i++)
+		disable |= msm_irq_idle_disable[i];
+	return !(disable || !smsm_int_info);
 }
 
 /* If arm9_wake is set: pass control to the other core.
@@ -301,8 +374,8 @@ void msm_irq_enter_sleep1(bool arm9_wake, int from_idle)
 
 int msm_irq_enter_sleep2(bool arm9_wake, int from_idle)
 {
-	int limit = 10;
-	uint32_t pending0, pending1;
+	int i, limit = 10;
+	uint32_t pending[VIC_NUM_REGS];
 
 	if (from_idle && !arm9_wake)
 		return 0;
@@ -311,23 +384,25 @@ int msm_irq_enter_sleep2(bool arm9_wake, int from_idle)
 	WARN_ON_ONCE(!arm9_wake && !from_idle);
 
 	if (msm_irq_debug_mask & IRQ_DEBUG_SLEEP)
-		printk(KERN_INFO "msm_irq_enter_sleep change irq, pend %x %x\n",
-		       readl(VIC_IRQ_STATUS0), readl(VIC_IRQ_STATUS1));
-	pending0 = readl(VIC_IRQ_STATUS0);
-	pending1 = readl(VIC_IRQ_STATUS1);
-	pending0 &= msm_irq_shadow_reg[0].int_en[!from_idle];
+		DPRINT_REGS(VIC_IRQ_STATUS, "%s change irq, pend", __func__);
+
+	for (i = 0; i < VIC_NUM_REGS; i++) {
+		pending[i] = readl(VIC_IRQ_STATUS0 + (i * 4));
+		pending[i] &= msm_irq_shadow_reg[i].int_en[!from_idle];
+	}
 	/* Clear INT_A9_M2A_5 since requesting sleep triggers it */
-	pending0 &= ~(1U << INT_A9_M2A_5);
-	pending1 &= msm_irq_shadow_reg[1].int_en[!from_idle];
-	if (pending0 || pending1) {
-		if (msm_irq_debug_mask & IRQ_DEBUG_SLEEP_ABORT)
-			printk(KERN_INFO "msm_irq_enter_sleep2 abort %x %x\n",
-			      pending0, pending1);
-		return -EAGAIN;
+	pending[0] &= ~(1U << INT_A9_M2A_5);
+
+	for (i = 0; i < VIC_NUM_REGS; i++) {
+		if (pending[i]) {
+			if (msm_irq_debug_mask & IRQ_DEBUG_SLEEP_ABORT)
+				DPRINT_ARRAY(pending, "%s abort",
+						       __func__);
+			return -EAGAIN;
+		}
 	}
 	    
-	writel(0, VIC_INT_EN0);
-	writel(0, VIC_INT_EN1);
+	msm_irq_write_all_regs(VIC_INT_EN0, 0);
 
 	while (limit-- > 0) {
 		int pend_irq;
@@ -345,8 +420,9 @@ int msm_irq_enter_sleep2(bool arm9_wake, int from_idle)
 		msm_irq_ack(INT_A9_M2A_6);
 		writel(1U << INT_A9_M2A_6, VIC_INT_ENSET0);
 	} else {
-		writel(msm_irq_shadow_reg[0].int_en[1], VIC_INT_ENSET0);
-		writel(msm_irq_shadow_reg[1].int_en[1], VIC_INT_ENSET1);
+		for (i = 0; i < VIC_NUM_REGS; i++)
+			writel(msm_irq_shadow_reg[i].int_en[1],
+						VIC_INT_ENSET0 + (i * 4));
 	}
 	return 0;
 }
@@ -357,7 +433,7 @@ void msm_irq_exit_sleep1(void)
 
 	msm_irq_ack(INT_A9_M2A_6);
 	msm_irq_ack(INT_PWB_I2C);
-	for (i = 0; i < 2; i++) {
+	for (i = 0; i < VIC_NUM_REGS; i++) {
 		writel(msm_irq_shadow_reg[i].int_type, VIC_INT_TYPE0 + i * 4);
 		writel(msm_irq_shadow_reg[i].int_polarity, VIC_INT_POLARITY0 + i * 4);
 		writel(msm_irq_shadow_reg[i].int_en[0], VIC_INT_EN0 + i * 4);
@@ -451,20 +527,16 @@ void __init msm_init_irq(void)
 	unsigned n;
 
 	/* select level interrupts */
-	writel(0, VIC_INT_TYPE0);
-	writel(0, VIC_INT_TYPE1);
+	msm_irq_write_all_regs(VIC_INT_TYPE0, 0);
 
 	/* select highlevel interrupts */
-	writel(0, VIC_INT_POLARITY0);
-	writel(0, VIC_INT_POLARITY1);
+	msm_irq_write_all_regs(VIC_INT_POLARITY0, 0);
 
 	/* select IRQ for all INTs */
-	writel(0, VIC_INT_SELECT0);
-	writel(0, VIC_INT_SELECT1);
+	msm_irq_write_all_regs(VIC_INT_SELECT0, 0);
 
 	/* disable all INTs */
-	writel(0, VIC_INT_EN0);
-	writel(0, VIC_INT_EN1);
+	msm_irq_write_all_regs(VIC_INT_EN0, 0);
 
 	/* don't use 1136 vic */
 	writel(0, VIC_CONFIG);
@@ -493,7 +565,7 @@ late_initcall(msm_init_irq_late);
 #if defined(CONFIG_MSM_FIQ_SUPPORT)
 void msm_trigger_irq(int irq)
 {
-	void __iomem *reg = VIC_SOFTINT0 + ((irq & 32) ? 4 : 0);
+	void __iomem *reg = VIC_INT_TO_REG_ADDR(VIC_SOFTINT0, irq);
 	uint32_t mask = 1UL << (irq & 31);
 	writel(mask, reg);
 }
@@ -516,8 +588,8 @@ void msm_fiq_disable(int irq)
 
 static void _msm_fiq_select(int irq)
 {
-	void __iomem *reg = VIC_INT_SELECT0 + ((irq & 32) ? 4 : 0);
-	unsigned index = (irq >> 5) & 1;
+	void __iomem *reg = VIC_INT_TO_REG_ADDR(VIC_INT_SELECT0, irq);
+	unsigned index = VIC_INT_TO_REG_INDEX(irq);
 	uint32_t mask = 1UL << (irq & 31);
 	unsigned long flags;
 
@@ -529,8 +601,8 @@ static void _msm_fiq_select(int irq)
 
 static void _msm_fiq_unselect(int irq)
 {
-	void __iomem *reg = VIC_INT_SELECT0 + ((irq & 32) ? 4 : 0);
-	unsigned index = (irq >> 5) & 1;
+	void __iomem *reg = VIC_INT_TO_REG_ADDR(VIC_INT_SELECT0, irq);
+	unsigned index = VIC_INT_TO_REG_INDEX(irq);
 	uint32_t mask = 1UL << (irq & 31);
 	unsigned long flags;
 

@@ -152,7 +152,6 @@ fault:
 
 static int tpa6130_remove(struct i2c_client *client)
 {
-	i2c_detach_client(client);
 	return 0;
 }
 static const struct i2c_device_id tpa6130_id[] = {

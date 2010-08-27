@@ -16,8 +16,6 @@
  */
 #define ARCH_KMALLOC_MINALIGN	L1_CACHE_BYTES
 
-#define ARCH_SLAB_MAX_DEBUG_ALIGN L1_CACHE_BYTES
-
 /*
  * With EABI on ARMv5 and above we must have 64-bit aligned slab pointers.
  */

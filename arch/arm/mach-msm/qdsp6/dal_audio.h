@@ -30,8 +30,6 @@
 #define __DAL_AUDIO_H__
 
 #include "dal_audio_format.h"
-#include "dal.h"
-#include <mach/msm_qdsp6_audio.h>
 
 #define AUDIO_DAL_DEVICE 0x02000028
 #define AUDIO_DAL_PORT "DSP_DAL_AQ_AUD"
@@ -431,25 +429,6 @@ struct adsp_buffer_command {
 /* This command has payload struct adsp_audio_set_equalizer_command. */
 #define ADSP_AUDIO_IOCTL_SET_SESSION_EQ_CONFIG		0x0108c0e0
 
-#define ADSP_AUDIO_MAX_EQ_BANDS		12
-
-/* Definition for any one band of Equalizer. */
-struct adsp_audio_eq_band {
-	u16	band_idx;
-	u32	filter_type;
-	u32	center_freq_hz;
-	s32	filter_gain;
-	s32	q_factor;
-} __attribute__ ((packed));
-
-struct adsp_audio_set_equalizer_command {
-	struct adsp_command_hdr hdr;
-	u32	enable;
-	u32	num_bands;
-	struct adsp_audio_eq_band eq_bands[ADSP_AUDIO_MAX_EQ_BANDS];
-} __attribute__ ((packed));
-
-
 /* Set Audio Video sync information. */
 /* This command has data payload, struct adsp_audio_set_av_sync_command. */
 #define ADSP_AUDIO_IOCTL_SET_SESSION_AVSYNC		0x0108d1e2
@@ -582,25 +561,5 @@ struct adsp_buffer_event {
 #define ADSP_AUDIO_DEVICE_CONTEXT_MIXED_RECORD		0x10
 #define ADSP_AUDIO_DEVICE_CONTEXT_RECORD		0x20
 #define ADSP_AUDIO_DEVICE_CONTEXT_PCM_LOOPBACK		0x40
-
-/* for EQ */
-#define CAD_EQ_INVALID_DATA        0xFFFFFFFF
-
-/* Equalizer filter band types */
-#define ADSP_AUDIO_EQUALIZER_TYPE_NONE		0
-#define ADSP_AUDIO_EQUALIZER_BASS_BOOST		1
-#define ADSP_AUDIO_EQUALIZER_BASS_CUT		2
-#define ADSP_AUDIO_EQUALIZER_TREBLE_BOOST	3
-#define ADSP_AUDIO_EQUALIZER_TREBLE_CUT		4
-#define ADSP_AUDIO_EQUALIZER_BAND_BOOST		5
-#define ADSP_AUDIO_EQUALIZER_BAND_CUT		6
-
-struct cad_audio_eq_cfg {
-	u32 enable;
-	u32 num_bands;
-	struct adsp_audio_eq_band eq_bands[ADSP_AUDIO_MAX_EQ_BANDS];
-} __attribute__ ((packed));
-
-int q6audio_set_stream_eq(struct audio_client *ac, struct cad_audio_eq_cfg *eq_cfg);
 
 #endif

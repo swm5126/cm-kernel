@@ -27,8 +27,6 @@
 
 struct early_suspend bma_early_suspend;
 
-
-
 static struct bma150_platform_data *this_pdata;
 
 static struct mutex gsensor_RW_mutex;
@@ -95,6 +93,9 @@ static int spi_gsensor_init_hw(void)
 	buffer[0] = RANGE_BWIDTH_REG;
 	if (spi_gsensor_read(buffer) < 0)
 		return -EIO;
+
+	/*printk("spi_gsensor_init_hw,read RANGE_BWIDTH_REG = %x "
+	, buffer[1]);*/
 
 	buffer[1] = (buffer[1]&0xe0);
 	buffer[0] = RANGE_BWIDTH_REG;
@@ -247,6 +248,7 @@ static int __spi_bma150_set_mode(char mode)
 	return ret;
 }
 
+
 static int spi_bma150_open(struct inode *inode, struct file *file)
 {
 	return nonseekable_open(inode, file);
@@ -308,8 +310,9 @@ static int spi_bma150_ioctl(struct inode *inode, struct file *file, unsigned int
 			return ret;
 		break;
 	case BMA_IOCTL_SET_MODE:
-		/*printk(KERN_INFO "%s: Set mode by ioctl!\n",
-			__func__);*/
+		/*printk(KERN_DEBUG
+		"%s: BMA_IOCTL_SET_MODE by ioctl = %d\n",
+			__func__,rwbuf[0]);*/
 		ret = __spi_bma150_set_mode(rwbuf[0]);
 		if (ret < 0)
 			return ret;
@@ -367,6 +370,7 @@ static void bma150_early_suspend(struct early_suspend *handler)
 {
 	int ret = 0;
 	ret = __spi_bma150_set_mode(BMA_MODE_SLEEP);
+
 	/*printk(KERN_DEBUG
 		"%s: spi_bma150_set_mode returned = %d!\n",
 			__func__, ret);*/

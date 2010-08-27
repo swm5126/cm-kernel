@@ -1,5 +1,4 @@
-/* drivers/video/msm_fb/mddi
- *
+/*
  * MSM MDDI Transport
  *
  * Copyright (C) 2007 Google Incorporated
@@ -25,6 +24,7 @@
 #include <linux/spinlock.h>
 #include <linux/clk.h>
 #include <linux/io.h>
+#include <linux/sched.h>
 #include <mach/msm_iomap.h>
 #include <mach/irqs.h>
 #include <mach/board.h>
@@ -160,7 +160,7 @@ static void mddi_handle_rev_data(struct mddi_info *mddi, union mddi_rev *rev)
 				printk(KERN_INFO "rev: got reg %x = %x without "
 						 " pending read\n",
 				       rev->reg.register_address,
-				       rev->reg.u.reg_data);
+				       rev->reg.register_data_list);
 				break;
 			}
 			if (ri->reg != rev->reg.register_address) {
@@ -168,12 +168,12 @@ static void mddi_handle_rev_data(struct mddi_info *mddi, union mddi_rev *rev)
 						 "wrong register, expected "
 						 "%x\n",
 				       rev->reg.register_address,
-				       rev->reg.u.reg_data, ri->reg);
+				       rev->reg.register_data_list, ri->reg);
 				break;
 			}
 			mddi->reg_read = NULL;
 			ri->status = 0;
-			ri->result = rev->reg.u.reg_data;
+			ri->result = rev->reg.register_data_list;
 			complete(&ri->done);
 			break;
 		default:
@@ -420,10 +420,6 @@ static uint16_t mddi_init_registers(struct mddi_info *mddi)
 	/* Recommendation from PAD hw team */
 	mddi_writel(0xa850f, PAD_CTL);
 
-#ifdef CONFIG_ARCH_QSD8X50
-	mddi_writel(0x00320000, PAD_IO_CTL);
-	mddi_writel(0x00220020, PAD_CAL);
-#endif
 
 	/* Need an even number for counts */
 	mddi_writel(0x60006, DRIVER_START_CNT);
@@ -527,7 +523,7 @@ static int __init mddi_get_client_caps(struct mddi_info *mddi)
 		printk(KERN_INFO KERN_ERR "mddi_init, timeout waiting for "
 				"caps\n");
 	}
-	return (mddi->flags & FLAG_HAVE_CAPS);
+	return mddi->flags & FLAG_HAVE_CAPS;
 }
 
 /* link must be active when this is called */
@@ -568,84 +564,51 @@ int mddi_check_status(struct mddi_info *mddi)
 }
 
 
-/*
- * mddi_remote_write_vals - send the register access packet
- *
- * @cdata: mddi layer dedicated structure, holding info needed by mddi
- * @val  : parameters
- * @reg  : cmd
- * @nr_bytes: size of parameters in bytes
- *
- * jay, Nov 13, 08'
- * extend the single parameter to multiple.
- */
-void mddi_remote_write_vals(struct msm_mddi_client_data *cdata, uint8_t * val,
-			uint32_t reg, unsigned int nr_bytes)
+void mddi_remote_write(struct msm_mddi_client_data *cdata, uint32_t val,
+		       uint32_t reg)
 {
 	struct mddi_info *mddi = container_of(cdata, struct mddi_info,
 					      client_data);
 	struct mddi_llentry *ll;
 	struct mddi_register_access *ra;
-	dma_addr_t bus_addr = 0;
+	/* unsigned s; */
 
 	mutex_lock(&mddi->reg_write_lock);
 
 	ll = mddi->reg_write_data;
 
 	ra = &(ll->u.r);
-	ra->length = 14 + nr_bytes;
+	ra->length = 14 + 4;
 	ra->type = TYPE_REGISTER_ACCESS;
 	ra->client_id = 0;
-	ra->read_write_info = MDDI_WRITE | (nr_bytes / 4);
+	ra->read_write_info = MDDI_WRITE | 1;
 	ra->crc16 = 0;
 
 	ra->register_address = reg;
+	ra->register_data_list = val;
 
 	ll->flags = 1;
-	/* register access packet header occupies 14 bytes */
 	ll->header_count = 14;
-	ll->data_count = nr_bytes; /* num of bytes in the data field */
-
-	if (nr_bytes == 4) {
-		uint32_t *prm = (uint32_t *)val;
-
-		ll->data = mddi->reg_write_addr +
-			offsetof(struct mddi_llentry, u.r.u.reg_data);
-		ra->u.reg_data = *prm;
-	} else {
-		int dma_retry = 5;
-
-		while (dma_retry--) {
-			bus_addr = dma_map_single(NULL, (void *)val, nr_bytes,
-					DMA_TO_DEVICE);
-			if (dma_mapping_error(NULL, bus_addr) == 0)
-				break;
-			msleep(1);
-		}
-		if (dma_retry == 0) {
-			printk(KERN_ERR "%s: dma map fail!\n", __func__);
-			return;
-		}
-
-		ll->data = bus_addr;
-		ra->u.reg_data_list = (uint32_t *)bus_addr;
-	}
+	ll->data_count = 4;
+	ll->data = mddi->reg_write_addr + offsetof(struct mddi_llentry,
+						   u.r.register_data_list);
 	ll->next = 0;
 	ll->reserved = 0;
 
-	/* inform mddi to start */
-	mddi_writel(mddi->reg_write_addr, PRI_PTR);
-	mddi_wait_interrupt(mddi, MDDI_INT_PRI_LINK_LIST_DONE);
-	if (bus_addr)
-		dma_unmap_single(NULL, bus_addr, nr_bytes, DMA_TO_DEVICE);
-	mutex_unlock(&mddi->reg_write_lock);
-}
+	/* s = mddi_readl(STAT); */
+	/* printk(KERN_INFO "mddi_remote_write(%x, %x), stat = %x\n", val,
+	 * reg, s); */
 
-void mddi_remote_write(struct msm_mddi_client_data *cdata, uint32_t val,
-			uint32_t reg)
-{
-	uint8_t * p = (uint8_t *)&val;
-	mddi_remote_write_vals(cdata, p, reg, 4);
+	mddi_writel(mddi->reg_write_addr, PRI_PTR);
+
+	/* s = mddi_readl(STAT); */
+	/* printk(KERN_INFO "mddi_remote_write(%x, %x) sent, stat = %x\n",
+	 * val, reg, s); */
+
+	mddi_wait_interrupt(mddi, MDDI_INT_PRI_LINK_LIST_DONE);
+	/* printk(KERN_INFO "mddi_remote_write(%x, %x) done, stat = %x\n",
+	 * val, reg, s); */
+	mutex_unlock(&mddi->reg_write_lock);
 }
 
 uint32_t mddi_remote_read(struct msm_mddi_client_data *cdata, uint32_t reg)
@@ -761,7 +724,6 @@ static int __init mddi_clk_setup(struct platform_device *pdev,
 	ret = clk_set_rate(mddi->clk, clk_rate);
 	if (ret)
 		goto fail;
-	printk(KERN_DEBUG "mddi runs at %ld\n", clk_get_rate(mddi->clk));
 	return 0;
 
 fail:
@@ -801,14 +763,12 @@ static int __init mddi_probe(struct platform_device *pdev)
 		printk(KERN_ERR "mddi: no associated mem resource!\n");
 		return -ENOMEM;
 	}
-
-	mddi->base = ioremap(resource->start,
-			resource->end - resource->start + 1);
+	mddi->base = ioremap(resource->start, resource->end - resource->start);
 	if (!mddi->base) {
+		printk(KERN_ERR "mddi: failed to remap base!\n");
 		ret = -EINVAL;
 		goto error_ioremap;
 	}
-
 	resource = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!resource) {
 		printk(KERN_ERR "mddi: no associated irq resource!\n");
@@ -824,24 +784,35 @@ static int __init mddi_probe(struct platform_device *pdev)
 	mutex_init(&mddi->reg_read_lock);
 	spin_lock_init(&mddi->int_lock);
 	init_waitqueue_head(&mddi->int_wait);
+
 	wake_lock_init(&mddi->idle_lock, WAKE_LOCK_IDLE, "mddi_idle_lock");
 	wake_lock_init(&mddi->link_active_idle_lock, WAKE_LOCK_IDLE,
 		       "mddi_link_active_idle_lock");
 
 	ret = mddi_clk_setup(pdev, mddi, pdata->clk_rate);
-	if (ret)
+	if (ret) {
+		printk(KERN_ERR "mddi: failed to setup clock!\n");
 		goto error_clk_setup;
+	}
 
 	ret = mddi_rev_data_setup(mddi);
-	if (ret)
+	if (ret) {
+		printk(KERN_ERR "mddi: failed to setup rev data!\n");
 		goto error_rev_data;
+	}
 
 	mddi->int_enable = 0;
 	mddi_writel(mddi->int_enable, INTEN);
 	ret = request_irq(mddi->irq, mddi_isr, IRQF_DISABLED, "mddi",
 			  &mddi->client_data);
-	if (ret)
+	if (ret) {
+		printk(KERN_ERR "mddi: failed to request enable irq!\n");
 		goto error_request_irq;
+	}
+
+	/* turn on the mddi client bridge chip */
+	if (mddi->power_client)
+		mddi->power_client(&mddi->client_data, 1);
 
 	/* initialize the mddi registers */
 	mddi_set_auto_hibernate(&mddi->client_data, 0);
@@ -863,12 +834,11 @@ static int __init mddi_probe(struct platform_device *pdev)
 		printk(KERN_INFO "mddi powerdown: stat %x\n", mddi_readl(STAT));
 		msleep(100);
 		printk(KERN_INFO "mddi powerdown: stat %x\n", mddi_readl(STAT));
-		goto dummy_client;
+		return 0;
 	}
-
 	mddi_set_auto_hibernate(&mddi->client_data, 1);
 
-	if (mddi->caps.Mfr_Name == 0 || mddi->caps.Product_Code == 0)
+	if (mddi->caps.Mfr_Name == 0 && mddi->caps.Product_Code == 0)
 		pdata->fixup(&mddi->caps.Mfr_Name, &mddi->caps.Product_Code);
 
 	mddi->client_pdev.id = 0;
@@ -886,16 +856,8 @@ static int __init mddi_probe(struct platform_device *pdev)
 		}
 	}
 
-	if (i >= pdata->num_clients) {
-dummy_client:
-		mddi->client_data.private_client_data =
-			pdata->client_platform_data[0].client_data;
-		mddi->client_pdev.name =
-			pdata->client_platform_data[0].name;
-		mddi->client_pdev.id =
-			pdata->client_platform_data[0].id;
+	if (i >= pdata->num_clients)
 		mddi->client_pdev.name = "mddi_c_dummy";
-	}
 	printk(KERN_INFO "mddi: registering panel %s\n",
 		mddi->client_pdev.name);
 
@@ -903,7 +865,6 @@ dummy_client:
 	mddi->client_data.resume = mddi_resume;
 	mddi->client_data.activate_link = mddi_activate_link;
 	mddi->client_data.remote_write = mddi_remote_write;
-	mddi->client_data.remote_write_vals = mddi_remote_write_vals;
 	mddi->client_data.remote_read = mddi_remote_read;
 	mddi->client_data.auto_hibernate = mddi_set_auto_hibernate;
 	mddi->client_data.fb_resource = pdata->fb_resource;
@@ -939,6 +900,38 @@ error_ioremap:
 	printk(KERN_INFO "mddi: mddi_init() failed (%d)\n", ret);
 	return ret;
 }
+
+#if 0 /* read/write mddi registers from userspace */
+module_param_named(debug, mddi_debug_flags, uint, 0644);
+
+static uint32_t selected_register;
+module_param_named(reg, selected_register, uint, 0644);
+
+static int set_reg(const char *val, struct kernel_param *kp)
+{
+	char *endp;
+	uint32_t l;
+
+	if (!val)
+		return -EINVAL;
+	l = simple_strtoul(val, &endp, 0);
+	if (endp == val || ((uint32_t)l != l))
+		return -EINVAL;
+	mddi_remote_write(kp->arg, l, selected_register);
+	return 0;
+}
+
+static int get_reg(char *buffer, struct kernel_param *kp)
+{
+	int val;
+	val = mddi_remote_read(kp->arg, selected_register);
+	return sprintf(buffer, "%x", val);
+}
+
+module_param_call(pmdh_val, set_reg, get_reg, &mddi_info[0], 0644);
+module_param_call(emdh_val, set_reg, get_reg, &mddi_info[1], 0644);
+
+#endif
 
 static struct platform_driver mddi_driver = {
 	.probe = mddi_probe,

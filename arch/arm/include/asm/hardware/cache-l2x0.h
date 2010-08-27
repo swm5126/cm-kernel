@@ -24,6 +24,8 @@
 #define L2X0_CACHE_TYPE			0x004
 #define L2X0_CTRL			0x100
 #define L2X0_AUX_CTRL			0x104
+#define L2X0_TAG_LATENCY_CTRL		0x108
+#define L2X0_DATA_LATENCY_CTRL		0x10C
 #define L2X0_EVENT_CNT_CTRL		0x200
 #define L2X0_EVENT_CNT1_CFG		0x204
 #define L2X0_EVENT_CNT0_CFG		0x208
@@ -51,10 +53,6 @@
 
 #ifndef __ASSEMBLY__
 extern void __init l2x0_init(void __iomem *base, __u32 aux_val, __u32 aux_mask);
-extern void l2x0_suspend(void);
-extern void l2x0_resume(int collapsed);
-extern void l2x0_cache_sync(void);
-extern void l2x0_cache_flush_all(void);
 #endif
 
 #endif

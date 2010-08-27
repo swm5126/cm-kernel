@@ -10,13 +10,6 @@ config BCM4329
 	  If you choose to build a module, it'll be called dhd. Say M if
 	  unsure.
 
-config BCM4329_SOFTAP
-	depends on BCM4329
-	bool "Broadcom 4329 Soft AP function"
-	---help---
-	  BCM4329 soft AP function	
-
-
 config BCM4329_FW_PATH
 	depends on BCM4329
 	string "Firmware path"

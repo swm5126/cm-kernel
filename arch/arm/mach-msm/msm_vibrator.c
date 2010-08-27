@@ -72,6 +72,8 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 	if (value == 0)
 		vibe_state = 0;
 	else {
+		printk(KERN_INFO "%s(parent:%s): vibrates %d msec\n",
+			current->comm, current->parent->comm, value);
 		value = (value > 15000 ? 15000 : value);
 		vibe_state = 1;
 		hrtimer_start(&vibe_timer,

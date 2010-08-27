@@ -19,44 +19,6 @@
 #include <linux/gpio_event.h>
 #include <linux/hrtimer.h>
 #include <linux/platform_device.h>
-#ifdef CONFIG_MACH_HEROC
-#include <linux/jiffies.h>
-#include <asm/mach-types.h>
-/* hero_c only */
-static spinlock_t filter_key_lock;
-static unsigned long filter_time = 50;
-
-struct _filter_key_set {
-	uint16_t check_key;
-	uint16_t filter_key[2];
-//	uint32_t filter_key_pos[2]; /* dependence on keycode position */
-	unsigned long key_jiff_stamp;
-	uint8_t force_release_key;
-};
-
-struct _filter_key_data {
-	struct _filter_key_set *filter_key_set;
-	uint8_t set_num;
-};
-
-static struct _filter_key_set key_set[] = {
-	{
-		.check_key = KEY_SEND,
-		.filter_key = { KEY_MENU, KEY_HOME },
-		.key_jiff_stamp = 0,
-	}, {
-		.check_key = KEY_END,
-		.filter_key = { KEY_COMPOSE, KEY_BACK },
-		.key_jiff_stamp = 0,
-	}
-};
-
-static struct _filter_key_data filter_key_data = {
-	.filter_key_set = key_set,
-	.set_num = ARRAY_SIZE(key_set),
-};
-
-#endif
 
 struct gpio_event {
 	struct gpio_event_input_devs *input_devs;
@@ -156,32 +118,6 @@ void gpio_event_resume(struct early_suspend *h)
 }
 #endif
 
-#ifdef CONFIG_MACH_HEROC
-static ssize_t gpio_key_filter_time_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	int ret = 0;
-	ret = sprintf(buf, "%lu\n", filter_time);
-	return ret;
-}
-static ssize_t gpio_key_filter_time_store(struct device *dev,
-	struct device_attribute *attr,
-	const char *buf, size_t count)
-{
-	unsigned long tmp = 0;
-	tmp = simple_strtoul(buf, NULL, 10);
-	if(tmp)
-		filter_time = tmp;
-	else
-		printk(KERN_WARNING "%s: setup filter_key fail...\n", __func__);
-
-	return count;
-}
-
-static DEVICE_ATTR(key_filter_time, 0644,
-	gpio_key_filter_time_show, gpio_key_filter_time_store);
-#endif
-
 static int __init gpio_event_probe(struct platform_device *pdev)
 {
 	int err;
@@ -256,16 +192,6 @@ static int __init gpio_event_probe(struct platform_device *pdev)
 		registered++;
 	}
 
-#ifdef CONFIG_MACH_HEROC
-	if(machine_is_heroc()) {
-		spin_lock_init(&filter_key_lock);
-		err = device_create_file(&pdev->dev,
-		&dev_attr_key_filter_time);
-		if(err)
-			pr_err("%s: Unable to create filter_key sysfs\n", __func__);
-	}
-#endif
-
 	return 0;
 
 err_input_register_device_failed:
@@ -331,60 +257,3 @@ module_exit(gpio_event_exit);
 MODULE_DESCRIPTION("GPIO Event Driver");
 MODULE_LICENSE("GPL");
 
-#ifdef CONFIG_MACH_HEROC
-uint8_t button_filter(struct input_dev *dev,
-		 unsigned int type, unsigned int code, int value, unsigned long *key_pressed)
-{
-	int ret = 1;
-	uint8_t loop_i, loop_j;
-	unsigned long irqflags;
-
-	if(!machine_is_heroc())
-		return ret;
-
-	spin_lock_irqsave(&filter_key_lock, irqflags);
-	if(!strcmp("heroc-keypad", dev->name) && (EV_KEY == type)) {
-		for(loop_i = 0; loop_i < filter_key_data.set_num; loop_i++) {
-			if(code == filter_key_data.filter_key_set[loop_i].filter_key[0] ||
-				code == filter_key_data.filter_key_set[loop_i].filter_key[1]) {
-				for(loop_j = 0; loop_j < 2; loop_j++) {
-					if(value) {
-						if(code == filter_key_data.filter_key_set[loop_i].filter_key[loop_j])
-							filter_key_data.filter_key_set[loop_i].force_release_key |= (0x1 << loop_j);
-					} else {
-						if(code == filter_key_data.filter_key_set[loop_i].filter_key[loop_j])
-							filter_key_data.filter_key_set[loop_i].force_release_key &= ~(0x1 << loop_j);
-					}
-				}
-				if(filter_key_data.filter_key_set[loop_i].key_jiff_stamp && value &&
-					time_after((filter_key_data.filter_key_set[loop_i].key_jiff_stamp + (filter_time * (HZ / 100))), jiffies)) {
-					for(loop_j = 0; loop_j < 2; loop_j++) {
-						if(code == filter_key_data.filter_key_set[loop_i].filter_key[loop_j]) {
-							printk(KERN_DEBUG "%s: in filter_time, discard: %d(%lu)\n", __func__, code, *key_pressed);
-							ret = 0;
-							break;
-						}
-					}
-				}
-			}
-		}
-		for(loop_i = 0; loop_i < filter_key_data.set_num && value; loop_i++) {
-			if(code == filter_key_data.filter_key_set[loop_i].check_key) {
-				for(loop_j = 0; loop_j < 2; loop_j++) {
-					if(filter_key_data.filter_key_set[loop_i].force_release_key & (0x1 << loop_j)) {
-						filter_key_data.filter_key_set[loop_i].force_release_key &= ~(0x1 << loop_j);
-						input_event(dev, type, filter_key_data.filter_key_set[loop_i].filter_key[loop_j], 0);
-					}
-				}
-				filter_key_data.filter_key_set[loop_i].key_jiff_stamp = jiffies;
-				printk(KERN_DEBUG "%s: store %d jiff_stamp: %lu\n", __func__,
-					filter_key_data.filter_key_set[loop_i].check_key,
-					filter_key_data.filter_key_set[loop_i].key_jiff_stamp);
-				break;
-			}
-		}
-	}
-	spin_unlock_irqrestore(&filter_key_lock, irqflags);
-	return ret;
-}
-#endif

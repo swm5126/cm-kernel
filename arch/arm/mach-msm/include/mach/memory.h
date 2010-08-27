@@ -21,23 +21,19 @@
 #define PHYS_OFFSET		UL(0x20000000)
 #elif defined(CONFIG_ARCH_MSM7225)
 #define PHYS_OFFSET		UL(0x02E00000)
-#elif defined(CONFIG_ARCH_MSM7200A)
-#define PHYS_OFFSET		UL(0x19200000)
-#elif defined(CONFIG_ARCH_MSM7201A)
-#define PHYS_OFFSET		UL(0x19200000)
-#elif defined(CONFIG_ARCH_MSM7X00A) && defined(CONFIG_MACH_DESIREC)
-#define PHYS_OFFSET		UL(0x11200000)
-#elif defined(CONFIG_ARCH_MSM7X00A)
-#define PHYS_OFFSET		UL(0x19200000)
 #elif defined(CONFIG_ARCH_MSM7227)
 #define PHYS_OFFSET		UL(0x12C00000)
+#elif defined(CONFIG_ARCH_MSM7230)
+#define PHYS_OFFSET		UL(0x04000000)
+#elif defined(CONFIG_ARCH_MSM7630) && defined(CONFIG_MACH_MECHA)
+#define PHYS_OFFSET		UL(0x04C00000)
+#elif defined(CONFIG_ARCH_MSM7630) && defined(CONFIG_MACH_SPEEDY)
+#define PHYS_OFFSET		UL(0x03C00000)
+#elif defined(CONFIG_ARCH_MSM7630)
+#define PHYS_OFFSET		UL(0x04A00000)
 #else
 #define PHYS_OFFSET		UL(0x10000000)
 #endif
-
-/* bus address and physical addresses are identical */
-#define __virt_to_bus(x)	__virt_to_phys(x)
-#define __bus_to_virt(x)	__phys_to_virt(x)
 
 #define HAS_ARCH_IO_REMAP_PFN_RANGE
 

@@ -24,10 +24,11 @@
 
 struct wifi_platform_data {
 	char *name;
-        int (*set_power)(int val);
-        int (*set_reset)(int val);
-        int (*set_carddetect)(int val);
+	int (*set_power)(int val);
+	int (*set_reset)(int val);
+	int (*set_carddetect)(int val);
 	void *(*mem_prealloc)(int section, unsigned long size);
+	int dot11n_enable;
 };
 
 #endif

@@ -19,7 +19,7 @@ struct lcm_va_cmd {
 
 	struct cabc_platform_data {
 		int (*change_cabcmode)(struct msm_mddi_client_data *client_data,
-				int mode, u8 dimming)
+				int mode, u8 dimming);
 	};
 
 struct cabc_config {
@@ -27,11 +27,12 @@ struct cabc_config {
 	int shrink;
 	uint8_t *pwm_data;
 	int min_level;
+	int default_br;
 	struct msm_mddi_client_data *client;
 	int (*bl_handle)(struct platform_device *, int);
 	int (*shrink_br)(int brightness);
 	int (*change_cabcmode)(struct msm_mddi_client_data *client_data,
-			int mode, u8 dimming)
+			int mode, u8 dimming);
 };
 
 #endif

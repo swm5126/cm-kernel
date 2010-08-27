@@ -1,3 +1,18 @@
+/* arch/arm/mach-msm/board-incrediblec-wifi.c
+ *
+ * Copyright (C) 2009 HTC Corporation.
+ *
+ * This software is licensed under the terms of the GNU General Public
+ * License version 2, as published by the Free Software Foundation, and
+ * may be copied, distributed, and modified under those terms.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+*/
+
+
 /* linux/arch/arm/mach-msm/board-incrediblec-wifi.c
 */
 #include <linux/kernel.h>
@@ -77,7 +92,7 @@ static struct resource incrediblec_wifi_resources[] = {
 		.name		= "bcm4329_wlan_irq",
 		.start		= MSM_GPIO_TO_INT(INCREDIBLEC_GPIO_WIFI_IRQ),
 		.end		= MSM_GPIO_TO_INT(INCREDIBLEC_GPIO_WIFI_IRQ),
-		.flags          = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL,
+		.flags          = IORESOURCE_IRQ | IORESOURCE_IRQ_LOWEDGE,
 	},
 };
 
@@ -86,6 +101,7 @@ static struct wifi_platform_data incrediblec_wifi_control = {
 	.set_reset      = incrediblec_wifi_reset,
 	.set_carddetect = incrediblec_wifi_set_carddetect,
 	.mem_prealloc   = incrediblec_wifi_mem_prealloc,
+	.dot11n_enable  = 1,
 };
 
 static struct platform_device incrediblec_wifi_device = {
@@ -123,6 +139,58 @@ static unsigned incrediblec_wifi_update_nvs(char *str)
 	return 0;
 }
 
+static unsigned strip_nvs_param(char* param)
+{
+	unsigned char *nvs_data;
+
+	unsigned param_len;
+	int start_idx, end_idx;
+
+	unsigned char *ptr;
+	unsigned len;
+
+	if (!param)
+		return -EINVAL;
+	ptr = get_wifi_nvs_ram();
+	/* Size in format LE assumed */
+	memcpy(&len, ptr + NVS_LEN_OFFSET, sizeof(len));
+
+	/* the last bye in NVRAM is 0, trim it */
+	if (ptr[NVS_DATA_OFFSET + len -1] == 0)
+		len -= 1;
+
+	nvs_data = ptr + NVS_DATA_OFFSET;
+
+	param_len = strlen(param);
+
+	/* search param */
+	for (start_idx = 0; start_idx < len - param_len; start_idx++) {
+		if (memcmp(&nvs_data[start_idx], param, param_len) == 0) {
+			break;
+		}
+	}
+
+	end_idx = 0;
+	if (start_idx < len - param_len) {
+		/* search end-of-line */
+		for (end_idx = start_idx + param_len; end_idx < len; end_idx++) {
+			if (nvs_data[end_idx] == '\n' || nvs_data[end_idx] == 0) {
+				break;
+			}
+		}
+	}
+
+	if (start_idx < end_idx) {
+		/* move the remain data forward */
+		for (; end_idx + 1 < len; start_idx++, end_idx++) {
+			nvs_data[start_idx] = nvs_data[end_idx+1];
+		}
+		len = len - (end_idx - start_idx + 1);
+		memcpy(ptr + NVS_LEN_OFFSET, &len, sizeof(len));
+	}
+	return 0;
+}
+
 static int __init incrediblec_wifi_init(void)
 {
 	int ret;
@@ -132,6 +200,20 @@ static int __init incrediblec_wifi_init(void)
 
 	printk("%s: start\n", __func__);
 	incrediblec_wifi_update_nvs("sd_oobonly=1\n");
+	incrediblec_wifi_update_nvs("btc_params80=0\n");
+
+	strip_nvs_param("pa0maxpwr");
+	incrediblec_wifi_update_nvs("pa0maxpwr=78\n");
+
+	strip_nvs_param("mcs2gpo0");
+	incrediblec_wifi_update_nvs("mcs2gpo0=0xCCCC\n");
+
+	strip_nvs_param("mcs2gpo1");
+	incrediblec_wifi_update_nvs("mcs2gpo1=0xCCCC\n");
+
+	strip_nvs_param("rxpo2g");
+	incrediblec_wifi_update_nvs("rxpo2g=0\n");
+
 	incrediblec_init_wifi_mem();
 	ret = platform_device_register(&incrediblec_wifi_device);
         return ret;

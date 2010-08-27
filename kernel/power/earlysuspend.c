@@ -103,6 +103,7 @@ static void early_suspend(struct work_struct *work)
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("early_suspend: sync\n");
 
+	pr_info("[R] early_suspend: sync\n");
 	sys_sync();
 abort:
 	spin_lock_irqsave(&state_lock, irqflags);

@@ -320,9 +320,8 @@ static void expire_wake_locks(unsigned long data)
 }
 static DEFINE_TIMER(expire_timer, expire_wake_locks, 0, 0);
 
-static int power_suspend_late(struct platform_device *pdev, pm_message_t state)
+static int power_suspend_late(struct device *dev)
 {
-	unsigned long irqflags;
 	int ret = has_wake_lock(WAKE_LOCK_SUSPEND) ? -EAGAIN : 0;
 #ifdef CONFIG_WAKELOCK_STAT
 	wait_for_wakeup = 1;
@@ -334,9 +333,13 @@ static int power_suspend_late(struct platform_device *pdev, pm_message_t state)
 	return ret;
 }
 
+static struct dev_pm_ops power_driver_pm_ops = {
+	.suspend_noirq = power_suspend_late,
+};
+
 static struct platform_driver power_driver = {
 	.driver.name = "power",
-	.suspend_late = power_suspend_late,
+	.driver.pm = &power_driver_pm_ops,
 };
 static struct platform_device power_device = {
 	.name = "power",

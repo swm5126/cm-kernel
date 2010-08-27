@@ -21,6 +21,24 @@
 
 struct mddi_info;
 
+/* output interface format */
+#define MSM_MDP_OUT_IF_FMT_RGB565 0
+#define MSM_MDP_OUT_IF_FMT_RGB666 1
+#define MSM_MDP_OUT_IF_FMT_RGB888 2
+
+/* mdp override operations */
+#define MSM_MDP_PANEL_IGNORE_PIXEL_DATA		(1 << 0)
+#define MSM_MDP_PANEL_FLIP_UD			(1 << 1)
+#define MSM_MDP_PANEL_FLIP_LR			(1 << 2)
+#define MSM_MDP4_MDDI_DMA_SWITCH		(1 << 3)
+
+/* mddi type */
+#define MSM_MDP_MDDI_TYPE_I	 0
+#define MSM_MDP_MDDI_TYPE_II	 1
+
+/* lcdc override operations */
+#define MSM_MDP_LCDC_DMA_PACK_ALIGN_LSB		(1 << 0)
+
 struct msm_fb_data {
 	int xres;	/* x resolution in pixels */
 	int yres;	/* y resolution in pixels */
@@ -108,6 +126,12 @@ enum {
 struct msm_mdp_platform_data {
 	/* from the enum above */
 	int dma_channel;
+	unsigned overrides;
+	unsigned color_format;
+	int tearing_check;
+	unsigned sync_config;
+	unsigned sync_thresh;
+	unsigned sync_start_pos;
 };
 
 struct msm_mddi_client_data {
@@ -138,6 +162,7 @@ struct msm_mddi_platform_data {
 	struct resource *fb_resource; /*optional*/
 	/* number of clients in the list that follows */
 	int num_clients;
+	unsigned type;
 	/* array of client information of clients */
 	struct {
 		unsigned product_id; /* mfr id in top 16 bits, product id
@@ -173,6 +198,7 @@ struct msm_lcdc_platform_data {
 	int				fb_id;
 	struct msm_fb_data		*fb_data;
 	struct resource			*fb_resource;
+	unsigned			 overrides;
 };
 
 struct msm_tvenc_platform_data {
@@ -193,10 +219,22 @@ struct mdp_device {
 	void (*dma_wait)(struct mdp_device *mdp, int interface);
 	int (*blit)(struct mdp_device *mdp, struct fb_info *fb,
 		    struct mdp_blit_req *req);
+#ifdef CONFIG_FB_MSM_OVERLAY
+	int (*overlay_get)(struct mdp_device *mdp, struct fb_info *fb,
+		    struct mdp_overlay *req);
+	int (*overlay_set)(struct mdp_device *mdp, struct fb_info *fb,
+		    struct mdp_overlay *req);
+	int (*overlay_unset)(struct mdp_device *mdp, struct fb_info *fb,
+		    int ndx);
+	int (*overlay_play)(struct mdp_device *mdp, struct fb_info *fb,
+		    struct msmfb_overlay_data *req, struct file *p_src_file);
+#endif
 	void (*set_grp_disp)(struct mdp_device *mdp, uint32_t disp_id);
 	void (*configure_dma)(struct mdp_device *mdp);
 	int (*check_output_format)(struct mdp_device *mdp, int bpp);
 	int (*set_output_format)(struct mdp_device *mdp, int bpp);
+	unsigned color_format;
+	unsigned overrides;
 };
 
 struct class_interface;
@@ -215,6 +253,8 @@ struct panel_data {
 	/* backlight data */
 	u8 *pwm;
 	int min_level;
+	/* default_br used in turn on backlight, must sync with setting in user space */
+	int default_br;
 	int (*shrink_br)(int brightness);
 	int (*change_cabcmode)(struct msm_mddi_client_data *client_data,
 			int mode, u8 dimming);
@@ -269,5 +309,18 @@ extern int display_notifier_call_chain(unsigned long val, void *data);
 	{ .notifier_call = fn, .priority = pri };       \
 	register_display_notifier(&fn##_nb);		\
 }
+
+#if (defined(CONFIG_USB_FUNCTION_PROJECTOR) || defined(CONFIG_USB_ANDROID_PROJECTOR))
+/* For USB Projector to quick access the frame buffer info */
+struct msm_fb_info {
+	unsigned char *fb_addr;
+	int msmfb_area;
+	int xres;
+	int yres;
+};
+
+extern int msmfb_get_var(struct msm_fb_info *tmp);
+extern int msmfb_get_fb_area(void);
+#endif
 
 #endif

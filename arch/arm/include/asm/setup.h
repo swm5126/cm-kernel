@@ -14,7 +14,7 @@
 #ifndef __ASMARM_SETUP_H
 #define __ASMARM_SETUP_H
 
-#include <asm/types.h>
+#include <linux/types.h>
 
 #define COMMAND_LINE_SIZE 1024
 
@@ -140,6 +140,14 @@ struct tag_als_kadc {
 	__u32 kadc;
 };
 
+/* Proximity sensor calibration values */
+#define ATAG_PS		0x5441001c
+
+struct tag_ps_kparam {
+	__u32 kparam1;
+	__u32 kparam2;
+};
+
 /* acorn RiscPC specific information */
 #define ATAG_ACORN	0x41000101
 
@@ -169,6 +177,7 @@ struct tag {
 		struct tag_revision	revision;
 		struct tag_microp_version	microp_version;
 		struct tag_als_kadc als_kadc;
+		struct tag_ps_kparam	ps_kparam;
 		struct tag_videolfb	videolfb;
 		struct tag_cmdline	cmdline;
 
@@ -217,7 +226,8 @@ static struct tagtable __tagtable_##fn __tag = { tag, fn }
 struct membank {
 	unsigned long start;
 	unsigned long size;
-	int           node;
+	unsigned short node;
+	unsigned short highmem;
 };
 
 struct meminfo {

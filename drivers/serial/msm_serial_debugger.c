@@ -26,24 +26,26 @@
 #include <linux/kernel_stat.h>
 #include <linux/irq.h>
 #include <linux/delay.h>
+#include <linux/sched.h>
 #include <linux/timer.h>
 #include <linux/wakelock.h>
+
+#include <asm/stacktrace.h>
 
 #include <mach/msm_serial_debugger.h>
 #include <mach/system.h>
 #include <mach/fiq.h>
+
 #include "msm_serial.h"
 
 #include <linux/uaccess.h>
-#include "../kernel/stacktrace.h"
 
-static DEFINE_MUTEX(msm_serial_mutex);
 static void sleep_timer_expired(unsigned long);
 
 static unsigned int debug_port_base;
 static int debug_signal_irq;
 static struct clk *debug_clk;
-static bool debug_clk_enabled = false;
+static bool debug_clk_enabled;
 static bool ignore_next_wakeup_irq;
 #ifdef CONFIG_MSM_SERIAL_DEBUGGER_NO_SLEEP
 static int no_sleep = true;
@@ -69,7 +71,8 @@ static inline void enable_wakeup_irq(unsigned int irq) {}
 static inline void disable_wakeup_irq(unsigned int irq) {}
 #else
 static inline void enable_wakeup_irq(unsigned int irq) {enable_irq(irq);}
-static inline void disable_wakeup_irq(unsigned int irq) {disable_irq(irq);}
+static inline void disable_wakeup_irq(unsigned int irq)
+						{disable_irq_nosync(irq);}
 #endif
 
 
@@ -94,27 +97,22 @@ static void debug_port_init(void)
 	msm_write(UART_CR_CMD_SET_RFR, UART_CR);
 
 	/* setup clock dividers */
-
-#if defined(CONFIG_ARCH_QSD8X50)
+#if defined(CONFIG_ARCH_QSD8X50) || defined(CONFIG_ARCH_MSM7X30)
 	if (clk_get_rate(debug_clk) == 19200000) {
 		/* clock is TCXO (19.2MHz) */
 		msm_write(0x06, UART_MREG);
 		msm_write(0xF1, UART_NREG);
 		msm_write(0x0F, UART_DREG);
 		msm_write(0x1A, UART_MNDREG);
-	} else {
+	} else
+#endif
+	{
 		/* clock must be TCXO/4 */
 		msm_write(0xC0, UART_MREG);
 		msm_write(0xB2, UART_NREG);
 		msm_write(0x7D, UART_DREG);
 		msm_write(0x1C, UART_MNDREG);
 	}
-#else
-	msm_write(0xC0, UART_MREG);
-	msm_write(0xB2, UART_NREG);
-	msm_write(0x7D, UART_DREG);
-	msm_write(0x1C, UART_MNDREG);
-#endif
 
 	msm_write(UART_CSR_115200, UART_CSR);
 
@@ -338,14 +336,14 @@ static void dump_irqs(void)
 	dprintf("irqnr       total  since-last   status  name\n");
 	for (n = 1; n < NR_IRQS; n++) {
 		struct irqaction *act = irq_desc[n].action;
-		if (!act && !kstat_cpu(0).irqs[n])
+		if (!act && !kstat_irqs(n))
 			continue;
 		dprintf("%5d: %10u %11u %8x  %s\n", n,
-			kstat_cpu(0).irqs[n],
-			kstat_cpu(0).irqs[n] - last_irqs[n],
+			kstat_irqs(n),
+			kstat_irqs(n) - last_irqs[n],
 			irq_desc[n].status,
 			(act && act->name) ? act->name : "???");
-		last_irqs[n] = kstat_cpu(0).irqs[n];
+		last_irqs[n] = kstat_irqs(n);
 	}
 }
 
@@ -410,12 +408,15 @@ void dump_stacktrace(struct pt_regs * const regs, unsigned int depth, void *ssp)
 	dump_regs((unsigned *)regs);
 
 	if (!user_mode(regs)) {
-		unsigned long base = regs->ARM_sp & ~(THREAD_SIZE - 1);
+		struct stackframe frame;
+		frame.fp = regs->ARM_fp;
+		frame.sp = regs->ARM_sp;
+		frame.lr = regs->ARM_lr;
+		frame.pc = regs->ARM_pc;
 		dprintf("  pc: %p (%pF), lr %p (%pF), sp %p, fp %p\n",
 			regs->ARM_pc, regs->ARM_pc, regs->ARM_lr, regs->ARM_lr,
 			regs->ARM_sp, regs->ARM_fp);
-		walk_stackframe(regs->ARM_fp, base, base + THREAD_SIZE,
-				report_trace, &depth);
+		walk_stackframe(&frame, report_trace, &depth);
 		return;
 	}
 
@@ -587,37 +588,6 @@ void msm_serial_debug_enable(int enable) {
 	debug_enable = enable;
 }
 
-unsigned char enable_uart = 1;
-static int uart_set_enabled(const char *val, struct kernel_param *kp)
-{
-	int enabled = simple_strtol(val, NULL, 0);
-	struct msm_serial_debug_platform_data *pdata;
-	int r;
-
-	if(enabled == 1 || enabled == 0){
-		pdata = init_data.clk_device->platform_data;
-		if(pdata && pdata->config_gpio){
-			pdata->config_gpio(enabled);
-			enable_uart = enabled;
-			printk(KERN_INFO "uart_set_enabled %d  \n", enable_uart);
-		}
-	}
-	return 0;
-}
-
-static int uart_get_enabled(char *buffer, struct kernel_param *kp)
-{
-	static void *clock_base;
-
-	printk(KERN_INFO "uart_get_enabled %d\n", enable_uart);
-
-	buffer[0] = '0'+enable_uart;
-	return 1;
-}
-
-module_param_call(uart_enabled, uart_set_enabled, uart_get_enabled, 0, 0664);
-
-
 void msm_serial_debug_init(unsigned int base, int irq,
 			   struct device *clk_device, int signal_irq, int wakeup_irq)
 {
@@ -641,21 +611,17 @@ void msm_serial_debug_init(unsigned int base, int irq,
 	init_data.wakeup_irq = wakeup_irq;
 	debug_port_base = (unsigned int) port;
 	debug_signal_irq = signal_irq;
-
 	clk_enable(debug_clk);
 	debug_port_init();
 
 	debug_printf_nfiq(NULL, "<hit enter %sto activate fiq debugger>\n",
 				no_sleep ? "" : "twice ");
-	ignore_next_wakeup_irq = true;
+	ignore_next_wakeup_irq = !no_sleep;
 
 	msm_fiq_select(irq);
 	msm_fiq_set_handler(debug_fiq, 0);
 	msm_fiq_enable(irq);
-/* r porting: FIXME! */
-#if !defined(CONFIG_ARCH_MSM7X00A) && !defined(CONFIG_ARCH_MSM7225)
 	clk_disable(debug_clk);
-#endif
 
 	ret = request_irq(signal_irq, debug_irq,
 			  IRQF_TRIGGER_RISING, "debug", 0);
@@ -676,46 +642,20 @@ void msm_serial_debug_init(unsigned int base, int irq,
 
 #if defined(CONFIG_MSM_SERIAL_DEBUGGER_CONSOLE)
 	register_console(&msm_serial_debug_console);
+	clk_enable(debug_clk);
 #endif
 	debugger_enable = 1;
-
-	/* on gpio */
-	if(clk_device) {
-		struct msm_serial_debug_platform_data *pdata;
-		pdata = clk_device->platform_data;
-		if(pdata && pdata->config_gpio){
-			if(pdata->disable_uart){
-				enable_uart = !(pdata->disable_uart);
-				pdata->config_gpio(enable_uart);
-				printk(KERN_INFO "enable_uart %d  \n", enable_uart);
-			}else{
-				enable_uart = 1;
-			pdata->config_gpio(1);
-				printk(KERN_INFO "enable_uart %d  \n", enable_uart);
-			}
-		}
-	}
-
 }
 static int msm_serial_debug_remove(const char *val, struct kernel_param *kp)
 {
 	int ret;
 	static int pre_stat = 1;
-	struct device *pdev = init_data.clk_device;
-	struct msm_serial_debug_platform_data *pdata;
-
-	mutex_lock(&msm_serial_mutex);
-
 	ret = param_set_bool(val, kp);
-	if (ret) {
-		mutex_unlock(&msm_serial_mutex);
+	if (ret)
 		return ret;
-	}
 
-	if (pre_stat == *(int *)kp->arg) {
-		mutex_unlock(&msm_serial_mutex);
+	if (pre_stat == *(int *)kp->arg)
 		return 0;
-	}
 
 	pre_stat = *(int *)kp->arg;
 
@@ -724,32 +664,22 @@ static int msm_serial_debug_remove(const char *val, struct kernel_param *kp)
 				init_data.clk_device, init_data.signal_irq,
 				init_data.wakeup_irq);
 		printk(KERN_INFO "enable FIQ serial debugger\n");
-		mutex_unlock(&msm_serial_mutex);
 		return 0;
 	}
 
 #if defined(CONFIG_MSM_SERIAL_DEBUGGER_CONSOLE)
 	unregister_console(&msm_serial_debug_console);
+	clk_disable(debug_clk);
 #endif
 	free_irq(init_data.wakeup_irq, 0);
 	free_irq(init_data.signal_irq, 0);
 	msm_fiq_set_handler(NULL, 0);
 	msm_fiq_disable(init_data.irq);
 	msm_fiq_unselect(init_data.irq);
-	if (debug_clk_enabled) {
+	if (debug_clk_enabled)
 		clk_disable(debug_clk);
-		debug_clk_enabled = false;
-	}
-
 	wake_lock_destroy(&debugger_wake_lock);
-	/* off gpio */
-	if(pdev) {
-		pdata = pdev->platform_data;
-		if(pdata && pdata->config_gpio)
-			pdata->config_gpio(0);
-	}
 	printk(KERN_INFO "disable FIQ serial debugger\n");
-	mutex_unlock(&msm_serial_mutex);
 	return 0;
 }
 module_param_call(enable, msm_serial_debug_remove, param_get_bool,

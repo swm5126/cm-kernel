@@ -18,6 +18,11 @@
 #define __ARCH_ARM_MACH_MSM_CLOCK_H
 
 #include <linux/list.h>
+#include <mach/clk.h>
+#if defined (CONFIG_ARCH_MSM7X30)
+#include "clock-pcom.h"
+#include "clock-7x30.h"
+#endif
 
 #define CLKFLAG_USE_MAX_TO_SET		(0x00000001)
 #define CLKFLAG_AUTO_OFF		(0x00000002)
@@ -29,11 +34,27 @@
 #define CLKFLAG_ARCH_QSD8X50		(0x00020000)
 #define CLKFLAG_ARCH_ALL		(0xffff0000)
 
+struct clk_ops {
+	int (*enable)(unsigned id);
+	void (*disable)(unsigned id);
+	void (*auto_off)(unsigned id);
+	int (*reset)(unsigned id, enum clk_reset_action action);
+	int (*set_rate)(unsigned id, unsigned rate);
+	int (*set_min_rate)(unsigned id, unsigned rate);
+	int (*set_max_rate)(unsigned id, unsigned rate);
+	int (*set_flags)(unsigned id, unsigned flags);
+	unsigned (*get_rate)(unsigned id);
+	unsigned (*is_enabled)(unsigned id);
+	long (*round_rate)(unsigned id, unsigned rate);
+};
+
 struct clk {
 	uint32_t id;
+	uint32_t remote_id;
 	uint32_t count;
 	uint32_t flags;
 	const char *name;
+	struct clk_ops *ops;
 	struct hlist_node list;
 	struct device *dev;
 	struct hlist_head handles;
@@ -91,7 +112,7 @@ struct clk_handle {
 #define USB_HS_PCLK		37  /* High speed USB pbus clock */
 #define USB_OTG_CLK		38  /* Full speed USB clock */
 #define VDC_CLK			39  /* Video controller clock */
-#if defined(CONFIG_ARCH_QSD8X50) || defined(CONFIG_ARCH_MSM7227) || defined(CONFIG_ARCH_MSM7X00A)
+#if defined(CONFIG_ARCH_QSD8X50) || defined(CONFIG_ARCH_MSM7227) || defined(CONFIG_ARCH_MSM7X00A) || defined(CONFIG_ARCH_MSM7X30)
 #define VFE_MDC_CLK		40  /* VFE MDDI client clock */
 #define VFE_CLK			41  /* Camera / Video Front End clock */
 #else
@@ -147,12 +168,43 @@ struct clk_handle {
 #define SDAC_MCLK		87
 #define MI2S_HDMI_CLK		88
 #define MI2S_HDMI_MCLK		89
-#define NR_CLKS			90
+#define AXI_ROTATOR_CLK	90
+#define HDMI_CLK		91
+#define CSI0_CLK		92
+#define CSI0_VFE_CLK		93
+#define CSI0_PCLK		94
+#define CSI1_CLK		95
+#define CSI1_VFE_CLK		96
+#define CSI1_PCLK		97
+#define GSBI_CLK		98
+#define GSBI_PCLK		99
+#define NR_CLKS			100
 
 extern struct clk msm_clocks[];
 
 void clk_enter_sleep(int from_idle);
 void clk_exit_sleep(void);
+
+#if defined (CONFIG_ARCH_MSM7X30)
+enum {
+	PLL_0 = 0,
+	PLL_1,
+	PLL_2,
+	PLL_3,
+	PLL_4,
+	PLL_5,
+	PLL_6,
+	NUM_PLL
+};
+
+enum clkvote_client {
+	CLKVOTE_ACPUCLK = 0,
+	CLKVOTE_PMQOS,
+	CLKVOTE_MAX,
+};
+
+unsigned long clk_get_max_axi_khz(void);
+#endif
 
 #endif
 

@@ -21,8 +21,10 @@
 #include <linux/kallsyms.h>
 #include <linux/mutex.h>
 #include <linux/pm.h>
+#include <linux/pm_runtime.h>
 #include <linux/resume-trace.h>
 #include <linux/rwsem.h>
+#include <linux/interrupt.h>
 #include <linux/timer.h>
 
 #include "../base.h"
@@ -51,8 +53,21 @@ static DEFINE_TIMER(dpm_drv_wd, dpm_drv_timeout, 0, 0);
  */
 static bool transition_started;
 
+static void
+pm_dev_trace(int type, struct device *dev, pm_message_t state, char *info);
+
 /**
- *	device_pm_lock - lock the list of active devices used by the PM core
+ * device_pm_init - Initialize the PM-related part of a device object.
+ * @dev: Device object being initialized.
+ */
+void device_pm_init(struct device *dev)
+{
+	dev->power.status = DPM_ON;
+	pm_runtime_init(dev);
+}
+
+/**
+ * device_pm_lock - Lock the list of active devices used by the PM core.
  */
 void device_pm_lock(void)
 {
@@ -60,7 +75,7 @@ void device_pm_lock(void)
 }
 
 /**
- *	device_pm_unlock - unlock the list of active devices used by the PM core
+ * device_pm_unlock - Unlock the list of active devices used by the PM core.
  */
 void device_pm_unlock(void)
 {
@@ -68,8 +83,8 @@ void device_pm_unlock(void)
 }
 
 /**
- *	device_pm_add - add a device to the list of active devices
- *	@dev:	Device to be added to the list
+ * device_pm_add - Add a device to the PM core's list of active devices.
+ * @dev: Device to add to the list.
  */
 void device_pm_add(struct device *dev)
 {
@@ -95,10 +110,8 @@ void device_pm_add(struct device *dev)
 }
 
 /**
- *	device_pm_remove - remove a device from the list of active devices
- *	@dev:	Device to be removed from the list
- *
- *	This function also removes the device's PM-related sysfs attributes.
+ * device_pm_remove - Remove a device from the PM core's list of active devices.
+ * @dev: Device to be removed from the list.
  */
 void device_pm_remove(struct device *dev)
 {
@@ -108,16 +121,62 @@ void device_pm_remove(struct device *dev)
 	mutex_lock(&dpm_list_mtx);
 	list_del_init(&dev->power.entry);
 	mutex_unlock(&dpm_list_mtx);
+	pm_runtime_remove(dev);
 }
 
 /**
- *	pm_op - execute the PM operation appropiate for given PM event
- *	@dev:	Device.
- *	@ops:	PM operations to choose from.
- *	@state:	PM transition of the system being carried out.
+ * device_pm_move_before - Move device in the PM core's list of active devices.
+ * @deva: Device to move in dpm_list.
+ * @devb: Device @deva should come before.
  */
-static int pm_op(struct device *dev, struct dev_pm_ops *ops,
-			pm_message_t state)
+void device_pm_move_before(struct device *deva, struct device *devb)
+{
+	pr_debug("PM: Moving %s:%s before %s:%s\n",
+		 deva->bus ? deva->bus->name : "No Bus",
+		 kobject_name(&deva->kobj),
+		 devb->bus ? devb->bus->name : "No Bus",
+		 kobject_name(&devb->kobj));
+	/* Delete deva from dpm_list and reinsert before devb. */
+	list_move_tail(&deva->power.entry, &devb->power.entry);
+}
+
+/**
+ * device_pm_move_after - Move device in the PM core's list of active devices.
+ * @deva: Device to move in dpm_list.
+ * @devb: Device @deva should come after.
+ */
+void device_pm_move_after(struct device *deva, struct device *devb)
+{
+	pr_debug("PM: Moving %s:%s after %s:%s\n",
+		 deva->bus ? deva->bus->name : "No Bus",
+		 kobject_name(&deva->kobj),
+		 devb->bus ? devb->bus->name : "No Bus",
+		 kobject_name(&devb->kobj));
+	/* Delete deva from dpm_list and reinsert after devb. */
+	list_move(&deva->power.entry, &devb->power.entry);
+}
+
+/**
+ * device_pm_move_last - Move device to end of the PM core's list of devices.
+ * @dev: Device to move in dpm_list.
+ */
+void device_pm_move_last(struct device *dev)
+{
+	pr_debug("PM: Moving %s:%s to end of list\n",
+		 dev->bus ? dev->bus->name : "No Bus",
+		 kobject_name(&dev->kobj));
+	list_move_tail(&dev->power.entry, &dpm_list);
+}
+
+/**
+ * pm_op - Execute the PM operation appropriate for given PM event.
+ * @dev: Device to handle.
+ * @ops: PM operations to choose from.
+ * @state: PM transition of the system being carried out.
+ */
+static int pm_op(struct device *dev,
+		 const struct dev_pm_ops *ops,
+		 pm_message_t state)
 {
 	int error = 0;
 
@@ -125,12 +184,14 @@ static int pm_op(struct device *dev, struct dev_pm_ops *ops,
 #ifdef CONFIG_SUSPEND
 	case PM_EVENT_SUSPEND:
 		if (ops->suspend) {
+			pm_dev_trace(TRACE_DPM_SUSPEND, dev, state, "");
 			error = ops->suspend(dev);
 			suspend_report_result(ops->suspend, error);
 		}
 		break;
 	case PM_EVENT_RESUME:
 		if (ops->resume) {
+			pm_dev_trace(TRACE_DPM_RESUME, dev, state, "");
 			error = ops->resume(dev);
 			suspend_report_result(ops->resume, error);
 		}
@@ -171,15 +232,16 @@ static int pm_op(struct device *dev, struct dev_pm_ops *ops,
 }
 
 /**
- *	pm_noirq_op - execute the PM operation appropiate for given PM event
- *	@dev:	Device.
- *	@ops:	PM operations to choose from.
- *	@state: PM transition of the system being carried out.
+ * pm_noirq_op - Execute the PM operation appropriate for given PM event.
+ * @dev: Device to handle.
+ * @ops: PM operations to choose from.
+ * @state: PM transition of the system being carried out.
  *
- *	The operation is executed with interrupts disabled by the only remaining
- *	functional CPU in the system.
+ * The driver of @dev will not receive interrupts while this function is being
+ * executed.
  */
-static int pm_noirq_op(struct device *dev, struct dev_pm_ops *ops,
+static int pm_noirq_op(struct device *dev,
+			const struct dev_pm_ops *ops,
 			pm_message_t state)
 {
 	int error = 0;
@@ -188,12 +250,16 @@ static int pm_noirq_op(struct device *dev, struct dev_pm_ops *ops,
 #ifdef CONFIG_SUSPEND
 	case PM_EVENT_SUSPEND:
 		if (ops->suspend_noirq) {
+			pm_dev_trace(TRACE_DPM_SUSPEND_NOIRQ,
+				dev, state, "LATE ");
 			error = ops->suspend_noirq(dev);
 			suspend_report_result(ops->suspend_noirq, error);
 		}
 		break;
 	case PM_EVENT_RESUME:
 		if (ops->resume_noirq) {
+			pm_dev_trace(TRACE_DPM_RESUME_NOIRQ,
+				dev, state, "EARLY ");
 			error = ops->resume_noirq(dev);
 			suspend_report_result(ops->resume_noirq, error);
 		}
@@ -257,6 +323,15 @@ static char *pm_verb(int event)
 	}
 }
 
+static void
+pm_dev_trace(int type, struct device *dev, pm_message_t state, char *info)
+{
+	TRACE_MASK(type, "%s %s: dpm %s%s%s\n", dev_driver_string(dev),
+		dev_name(dev), info, pm_verb(state.event),
+		((state.event & PM_EVENT_SLEEP) && device_may_wakeup(dev)) ?
+		", may wakeup" : "");
+}
+
 static void pm_dev_dbg(struct device *dev, pm_message_t state, char *info)
 {
 	dev_dbg(dev, "%s%s%s\n", info, pm_verb(state.event),
@@ -274,13 +349,14 @@ static void pm_dev_err(struct device *dev, pm_message_t state, char *info,
 /*------------------------- Resume routines -------------------------*/
 
 /**
- *	resume_device_noirq - Power on one device (early resume).
- *	@dev:	Device.
- *	@state: PM transition of the system being carried out.
+ * device_resume_noirq - Execute an "early resume" callback for given device.
+ * @dev: Device to handle.
+ * @state: PM transition of the system being carried out.
  *
- *	Must be called with interrupts disabled.
+ * The driver of @dev will not receive interrupts while this function is being
+ * executed.
  */
-static int resume_device_noirq(struct device *dev, pm_message_t state)
+static int device_resume_noirq(struct device *dev, pm_message_t state)
 {
 	int error = 0;
 
@@ -293,9 +369,6 @@ static int resume_device_noirq(struct device *dev, pm_message_t state)
 	if (dev->bus->pm) {
 		pm_dev_dbg(dev, state, "EARLY ");
 		error = pm_noirq_op(dev, dev->bus->pm, state);
-	} else if (dev->bus->resume_early) {
-		pm_dev_dbg(dev, state, "legacy EARLY ");
-		error = dev->bus->resume_early(dev);
 	}
  End:
 	TRACE_RESUME(error);
@@ -303,50 +376,38 @@ static int resume_device_noirq(struct device *dev, pm_message_t state)
 }
 
 /**
- *	dpm_power_up - Power on all regular (non-sysdev) devices.
- *	@state: PM transition of the system being carried out.
+ * dpm_resume_noirq - Execute "early resume" callbacks for non-sysdev devices.
+ * @state: PM transition of the system being carried out.
  *
- *	Execute the appropriate "noirq resume" callback for all devices marked
- *	as DPM_OFF_IRQ.
- *
- *	Must be called with interrupts disabled and only one CPU running.
+ * Call the "noirq" resume handlers for all devices marked as DPM_OFF_IRQ and
+ * enable device drivers to receive interrupts.
  */
-static void dpm_power_up(pm_message_t state)
+void dpm_resume_noirq(pm_message_t state)
 {
 	struct device *dev;
 
+	mutex_lock(&dpm_list_mtx);
+	transition_started = false;
 	list_for_each_entry(dev, &dpm_list, power.entry)
 		if (dev->power.status > DPM_OFF) {
 			int error;
 
 			dev->power.status = DPM_OFF;
-			error = resume_device_noirq(dev, state);
+			error = device_resume_noirq(dev, state);
 			if (error)
 				pm_dev_err(dev, state, " early", error);
 		}
+	mutex_unlock(&dpm_list_mtx);
+	resume_device_irqs();
 }
+EXPORT_SYMBOL_GPL(dpm_resume_noirq);
 
 /**
- *	device_power_up - Turn on all devices that need special attention.
- *	@state: PM transition of the system being carried out.
- *
- *	Power on system devices, then devices that required we shut them down
- *	with interrupts disabled.
- *
- *	Must be called with interrupts disabled.
+ * device_resume - Execute "resume" callbacks for given device.
+ * @dev: Device to handle.
+ * @state: PM transition of the system being carried out.
  */
-void device_power_up(pm_message_t state)
-{
-	dpm_power_up(state);
-}
-EXPORT_SYMBOL_GPL(device_power_up);
-
-/**
- *	resume_device - Restore state for one device.
- *	@dev:	Device.
- *	@state: PM transition of the system being carried out.
- */
-static int resume_device(struct device *dev, pm_message_t state)
+static int device_resume(struct device *dev, pm_message_t state)
 {
 	int error = 0;
 
@@ -361,6 +422,7 @@ static int resume_device(struct device *dev, pm_message_t state)
 			error = pm_op(dev, dev->bus->pm, state);
 		} else if (dev->bus->resume) {
 			pm_dev_dbg(dev, state, "legacy ");
+			pm_dev_trace(TRACE_DPM_RESUME, dev, state, "legacy ");
 			error = dev->bus->resume(dev);
 		}
 		if (error)
@@ -371,9 +433,6 @@ static int resume_device(struct device *dev, pm_message_t state)
 		if (dev->type->pm) {
 			pm_dev_dbg(dev, state, "type ");
 			error = pm_op(dev, dev->type->pm, state);
-		} else if (dev->type->resume) {
-			pm_dev_dbg(dev, state, "legacy type ");
-			error = dev->type->resume(dev);
 		}
 		if (error)
 			goto End;
@@ -385,6 +444,8 @@ static int resume_device(struct device *dev, pm_message_t state)
 			error = pm_op(dev, dev->class->pm, state);
 		} else if (dev->class->resume) {
 			pm_dev_dbg(dev, state, "legacy class ");
+			pm_dev_trace(TRACE_DPM_RESUME,
+				dev, state, "legacy class ");
 			error = dev->class->resume(dev);
 		}
 	}
@@ -435,11 +496,11 @@ static void dpm_drv_wdclr(struct device *dev)
 }
 
 /**
- *	dpm_resume - Resume every device.
- *	@state: PM transition of the system being carried out.
+ * dpm_resume - Execute "resume" callbacks for non-sysdev devices.
+ * @state: PM transition of the system being carried out.
  *
- *	Execute the appropriate "resume" callback for all devices the status of
- *	which indicates that they are inactive.
+ * Execute the appropriate "resume" callback for all devices whose status
+ * indicates that they are suspended.
  */
 static void dpm_resume(pm_message_t state)
 {
@@ -447,7 +508,6 @@ static void dpm_resume(pm_message_t state)
 
 	INIT_LIST_HEAD(&list);
 	mutex_lock(&dpm_list_mtx);
-	transition_started = false;
 	while (!list_empty(&dpm_list)) {
 		struct device *dev = to_device(dpm_list.next);
 
@@ -458,7 +518,7 @@ static void dpm_resume(pm_message_t state)
 			dev->power.status = DPM_RESUMING;
 			mutex_unlock(&dpm_list_mtx);
 
-			error = resume_device(dev, state);
+			error = device_resume(dev, state);
 
 			mutex_lock(&dpm_list_mtx);
 			if (error)
@@ -476,26 +536,31 @@ static void dpm_resume(pm_message_t state)
 }
 
 /**
- *	complete_device - Complete a PM transition for given device
- *	@dev:	Device.
- *	@state: PM transition of the system being carried out.
+ * device_complete - Complete a PM transition for given device.
+ * @dev: Device to handle.
+ * @state: PM transition of the system being carried out.
  */
-static void complete_device(struct device *dev, pm_message_t state)
+static void device_complete(struct device *dev, pm_message_t state)
 {
 	down(&dev->sem);
 
 	if (dev->class && dev->class->pm && dev->class->pm->complete) {
 		pm_dev_dbg(dev, state, "completing class ");
+		pm_dev_trace(TRACE_DPM_COMPLETE,
+			dev, state, "completing class ");
 		dev->class->pm->complete(dev);
 	}
 
 	if (dev->type && dev->type->pm && dev->type->pm->complete) {
 		pm_dev_dbg(dev, state, "completing type ");
+		pm_dev_trace(TRACE_DPM_COMPLETE,
+			dev, state, "completing type ");
 		dev->type->pm->complete(dev);
 	}
 
 	if (dev->bus && dev->bus->pm && dev->bus->pm->complete) {
 		pm_dev_dbg(dev, state, "completing ");
+		pm_dev_trace(TRACE_DPM_COMPLETE, dev, state, "completing ");
 		dev->bus->pm->complete(dev);
 	}
 
@@ -503,11 +568,11 @@ static void complete_device(struct device *dev, pm_message_t state)
 }
 
 /**
- *	dpm_complete - Complete a PM transition for all devices.
- *	@state: PM transition of the system being carried out.
+ * dpm_complete - Complete a PM transition for all non-sysdev devices.
+ * @state: PM transition of the system being carried out.
  *
- *	Execute the ->complete() callbacks for all devices that are not marked
- *	as DPM_ON.
+ * Execute the ->complete() callbacks for all devices whose PM status is not
+ * DPM_ON (this allows new devices to be registered).
  */
 static void dpm_complete(pm_message_t state)
 {
@@ -515,6 +580,7 @@ static void dpm_complete(pm_message_t state)
 
 	INIT_LIST_HEAD(&list);
 	mutex_lock(&dpm_list_mtx);
+	transition_started = false;
 	while (!list_empty(&dpm_list)) {
 		struct device *dev = to_device(dpm_list.prev);
 
@@ -523,7 +589,8 @@ static void dpm_complete(pm_message_t state)
 			dev->power.status = DPM_ON;
 			mutex_unlock(&dpm_list_mtx);
 
-			complete_device(dev, state);
+			device_complete(dev, state);
+			pm_runtime_put_noidle(dev);
 
 			mutex_lock(&dpm_list_mtx);
 		}
@@ -536,27 +603,29 @@ static void dpm_complete(pm_message_t state)
 }
 
 /**
- *	device_resume - Restore state of each device in system.
- *	@state: PM transition of the system being carried out.
+ * dpm_resume_end - Execute "resume" callbacks and complete system transition.
+ * @state: PM transition of the system being carried out.
  *
- *	Resume all the devices, unlock them all, and allow new
- *	devices to be registered once again.
+ * Execute "resume" callbacks for all devices and complete the PM transition of
+ * the system.
  */
-void device_resume(pm_message_t state)
+void dpm_resume_end(pm_message_t state)
 {
 	might_sleep();
 	dpm_resume(state);
 	dpm_complete(state);
 }
-EXPORT_SYMBOL_GPL(device_resume);
+EXPORT_SYMBOL_GPL(dpm_resume_end);
 
 
 /*------------------------- Suspend routines -------------------------*/
 
 /**
- *	resume_event - return a PM message representing the resume event
- *	               corresponding to given sleep state.
- *	@sleep_state: PM message representing a sleep state.
+ * resume_event - Return a "resume" message for given "suspend" sleep state.
+ * @sleep_state: PM message representing a sleep state.
+ *
+ * Return a PM message representing the resume event corresponding to given
+ * sleep state.
  */
 static pm_message_t resume_event(pm_message_t sleep_state)
 {
@@ -573,13 +642,14 @@ static pm_message_t resume_event(pm_message_t sleep_state)
 }
 
 /**
- *	suspend_device_noirq - Shut down one device (late suspend).
- *	@dev:	Device.
- *	@state: PM transition of the system being carried out.
+ * device_suspend_noirq - Execute a "late suspend" callback for given device.
+ * @dev: Device to handle.
+ * @state: PM transition of the system being carried out.
  *
- *	This is called with interrupts off and only a single CPU running.
+ * The driver of @dev will not receive interrupts while this function is being
+ * executed.
  */
-static int suspend_device_noirq(struct device *dev, pm_message_t state)
+static int device_suspend_noirq(struct device *dev, pm_message_t state)
 {
 	int error = 0;
 
@@ -589,48 +659,45 @@ static int suspend_device_noirq(struct device *dev, pm_message_t state)
 	if (dev->bus->pm) {
 		pm_dev_dbg(dev, state, "LATE ");
 		error = pm_noirq_op(dev, dev->bus->pm, state);
-	} else if (dev->bus->suspend_late) {
-		pm_dev_dbg(dev, state, "legacy LATE ");
-		error = dev->bus->suspend_late(dev, state);
-		suspend_report_result(dev->bus->suspend_late, error);
 	}
 	return error;
 }
 
 /**
- *	device_power_down - Shut down special devices.
- *	@state: PM transition of the system being carried out.
+ * dpm_suspend_noirq - Execute "late suspend" callbacks for non-sysdev devices.
+ * @state: PM transition of the system being carried out.
  *
- *	Power down devices that require interrupts to be disabled.
- *	Then power down system devices.
- *
- *	Must be called with interrupts disabled and only one CPU running.
+ * Prevent device drivers from receiving interrupts and call the "noirq" suspend
+ * handlers for all non-sysdev devices.
  */
-int device_power_down(pm_message_t state)
+int dpm_suspend_noirq(pm_message_t state)
 {
 	struct device *dev;
 	int error = 0;
 
+	suspend_device_irqs();
+	mutex_lock(&dpm_list_mtx);
 	list_for_each_entry_reverse(dev, &dpm_list, power.entry) {
-		error = suspend_device_noirq(dev, state);
+		error = device_suspend_noirq(dev, state);
 		if (error) {
 			pm_dev_err(dev, state, " late", error);
 			break;
 		}
 		dev->power.status = DPM_OFF_IRQ;
 	}
+	mutex_unlock(&dpm_list_mtx);
 	if (error)
-		dpm_power_up(resume_event(state));
+		dpm_resume_noirq(resume_event(state));
 	return error;
 }
-EXPORT_SYMBOL_GPL(device_power_down);
+EXPORT_SYMBOL_GPL(dpm_suspend_noirq);
 
 /**
- *	suspend_device - Save state of one device.
- *	@dev:	Device.
- *	@state: PM transition of the system being carried out.
+ * device_suspend - Execute "suspend" callbacks for given device.
+ * @dev: Device to handle.
+ * @state: PM transition of the system being carried out.
  */
-static int suspend_device(struct device *dev, pm_message_t state)
+static int device_suspend(struct device *dev, pm_message_t state)
 {
 	int error = 0;
 
@@ -642,6 +709,8 @@ static int suspend_device(struct device *dev, pm_message_t state)
 			error = pm_op(dev, dev->class->pm, state);
 		} else if (dev->class->suspend) {
 			pm_dev_dbg(dev, state, "legacy class ");
+			pm_dev_trace(TRACE_DPM_SUSPEND,
+				dev, state, "legacy class ");
 			error = dev->class->suspend(dev, state);
 			suspend_report_result(dev->class->suspend, error);
 		}
@@ -653,10 +722,6 @@ static int suspend_device(struct device *dev, pm_message_t state)
 		if (dev->type->pm) {
 			pm_dev_dbg(dev, state, "type ");
 			error = pm_op(dev, dev->type->pm, state);
-		} else if (dev->type->suspend) {
-			pm_dev_dbg(dev, state, "legacy type ");
-			error = dev->type->suspend(dev, state);
-			suspend_report_result(dev->type->suspend, error);
 		}
 		if (error)
 			goto End;
@@ -668,6 +733,7 @@ static int suspend_device(struct device *dev, pm_message_t state)
 			error = pm_op(dev, dev->bus->pm, state);
 		} else if (dev->bus->suspend) {
 			pm_dev_dbg(dev, state, "legacy ");
+			pm_dev_trace(TRACE_DPM_SUSPEND, dev, state, "legacy ");
 			error = dev->bus->suspend(dev, state);
 			suspend_report_result(dev->bus->suspend, error);
 		}
@@ -679,10 +745,8 @@ static int suspend_device(struct device *dev, pm_message_t state)
 }
 
 /**
- *	dpm_suspend - Suspend every device.
- *	@state: PM transition of the system being carried out.
- *
- *	Execute the appropriate "suspend" callbacks for all devices.
+ * dpm_suspend - Execute "suspend" callbacks for all non-sysdev devices.
+ * @state: PM transition of the system being carried out.
  */
 static int dpm_suspend(pm_message_t state)
 {
@@ -698,7 +762,7 @@ static int dpm_suspend(pm_message_t state)
 		mutex_unlock(&dpm_list_mtx);
 
 		dpm_drv_wdset(dev);
-		error = suspend_device(dev, state);
+		error = device_suspend(dev, state);
 		dpm_drv_wdclr(dev);
 
 		mutex_lock(&dpm_list_mtx);
@@ -718,11 +782,14 @@ static int dpm_suspend(pm_message_t state)
 }
 
 /**
- *	prepare_device - Execute the ->prepare() callback(s) for given device.
- *	@dev:	Device.
- *	@state: PM transition of the system being carried out.
+ * device_prepare - Prepare a device for system power transition.
+ * @dev: Device to handle.
+ * @state: PM transition of the system being carried out.
+ *
+ * Execute the ->prepare() callback(s) for given device.  No new children of the
+ * device may be registered after this function has returned.
  */
-static int prepare_device(struct device *dev, pm_message_t state)
+static int device_prepare(struct device *dev, pm_message_t state)
 {
 	int error = 0;
 
@@ -730,6 +797,7 @@ static int prepare_device(struct device *dev, pm_message_t state)
 
 	if (dev->bus && dev->bus->pm && dev->bus->pm->prepare) {
 		pm_dev_dbg(dev, state, "preparing ");
+		pm_dev_trace(TRACE_DPM_PREPARE, dev, state, "preparing ");
 		error = dev->bus->pm->prepare(dev);
 		suspend_report_result(dev->bus->pm->prepare, error);
 		if (error)
@@ -738,6 +806,7 @@ static int prepare_device(struct device *dev, pm_message_t state)
 
 	if (dev->type && dev->type->pm && dev->type->pm->prepare) {
 		pm_dev_dbg(dev, state, "preparing type ");
+		pm_dev_trace(TRACE_DPM_PREPARE, dev, state, "preparing type ");
 		error = dev->type->pm->prepare(dev);
 		suspend_report_result(dev->type->pm->prepare, error);
 		if (error)
@@ -746,6 +815,7 @@ static int prepare_device(struct device *dev, pm_message_t state)
 
 	if (dev->class && dev->class->pm && dev->class->pm->prepare) {
 		pm_dev_dbg(dev, state, "preparing class ");
+		pm_dev_trace(TRACE_DPM_PREPARE, dev, state, "preparing class ");
 		error = dev->class->pm->prepare(dev);
 		suspend_report_result(dev->class->pm->prepare, error);
 	}
@@ -756,10 +826,10 @@ static int prepare_device(struct device *dev, pm_message_t state)
 }
 
 /**
- *	dpm_prepare - Prepare all devices for a PM transition.
- *	@state: PM transition of the system being carried out.
+ * dpm_prepare - Prepare all non-sysdev devices for a system PM transition.
+ * @state: PM transition of the system being carried out.
  *
- *	Execute the ->prepare() callback for all devices.
+ * Execute the ->prepare() callback(s) for all devices.
  */
 static int dpm_prepare(pm_message_t state)
 {
@@ -776,13 +846,21 @@ static int dpm_prepare(pm_message_t state)
 		dev->power.status = DPM_PREPARING;
 		mutex_unlock(&dpm_list_mtx);
 
-		error = prepare_device(dev, state);
+		pm_runtime_get_noresume(dev);
+		if (pm_runtime_barrier(dev) && device_may_wakeup(dev)) {
+			/* Wake-up requested during system sleep transition. */
+			pm_runtime_put_noidle(dev);
+			error = -EBUSY;
+		} else {
+			error = device_prepare(dev, state);
+		}
 
 		mutex_lock(&dpm_list_mtx);
 		if (error) {
 			dev->power.status = DPM_ON;
 			if (error == -EAGAIN) {
 				put_device(dev);
+				error = 0;
 				continue;
 			}
 			printk(KERN_ERR "PM: Failed to prepare device %s "
@@ -802,12 +880,13 @@ static int dpm_prepare(pm_message_t state)
 }
 
 /**
- *	device_suspend - Save state and stop all devices in system.
- *	@state: PM transition of the system being carried out.
+ * dpm_suspend_start - Prepare devices for PM transition and suspend them.
+ * @state: PM transition of the system being carried out.
  *
- *	Prepare and suspend all devices.
+ * Prepare all non-sysdev devices for system PM transition and execute "suspend"
+ * callbacks for them.
  */
-int device_suspend(pm_message_t state)
+int dpm_suspend_start(pm_message_t state)
 {
 	int error;
 
@@ -817,7 +896,7 @@ int device_suspend(pm_message_t state)
 		error = dpm_suspend(state);
 	return error;
 }
-EXPORT_SYMBOL_GPL(device_suspend);
+EXPORT_SYMBOL_GPL(dpm_suspend_start);
 
 void __suspend_report_result(const char *function, void *fn, int ret)
 {

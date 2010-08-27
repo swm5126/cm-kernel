@@ -17,7 +17,7 @@
 
 void arch_idle(void);
 
-static inline void arch_reset(char mode)
+static inline void arch_reset(char mode, const char *cmd)
 {
 	for (;;) ;  /* depends on IPC w/ other core */
 }
@@ -28,4 +28,4 @@ static inline void arch_reset(char mode)
 extern void (*msm_hw_reset_hook)(void);
 
 void msm_set_i2c_mux(bool gpio, int *gpio_clk, int *gpio_dat, int clk_str, int dat_str);
-
+void msm_i2c_gpio_init(void);

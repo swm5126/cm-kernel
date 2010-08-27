@@ -86,7 +86,7 @@ static void keyreset_event(struct input_handle *handle, unsigned int type,
 		state->restart_disabled = 1;
 		if (restart_requested)
 			panic("keyboard reset failed, %d", restart_requested);
-		pr_info("\t\t## Keyboard reset ##\n");
+		pr_info("keyboard reset\n");
 		schedule_work(&restart_work);
 		restart_requested = 1;
 	}

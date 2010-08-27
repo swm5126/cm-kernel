@@ -29,6 +29,7 @@
 #include <mach/msm_iomap.h>
 #include <mach/htc_acoustic_qsd.h>
 #include <mach/msm_qdsp6_audio.h>
+#include <mach/htc_headset_mgr.h>
 
 #include "smd_private.h"
 
@@ -80,7 +81,7 @@ static int is_rpc_connect(void)
 	return 0;
 }
 
-int turn_mic_bias_on(int on)
+int enable_mic_bias(int on)
 {
 	D("%s called %d\n", __func__, on);
 	if (the_ops->enable_mic_bias)
@@ -88,7 +89,22 @@ int turn_mic_bias_on(int on)
 
 	return 0;
 }
-EXPORT_SYMBOL(turn_mic_bias_on);
+
+int enable_mos_test(int enable)
+{
+	static int mos_test_enable;
+	int res = 0;
+	if (enable != mos_test_enable) {
+		D("%s called %d\n", __func__, enable);
+		if (enable)
+			res = q6audio_reinit_acdb("default_mos.acdb");
+		else
+			res = q6audio_reinit_acdb("default.acdb");
+		mos_test_enable = enable;
+	}
+	return res;
+}
+EXPORT_SYMBOL(enable_mos_test);
 
 int force_headset_speaker_on(int enable)
 {
@@ -395,6 +411,14 @@ static int __init acoustic_init(void)
 		goto err_create_class_device;
 
 	mutex_init(&acoustic_lock);
+
+#if defined(CONFIG_HTC_HEADSET_MGR)
+	struct headset_notifier notifier;
+	notifier.id = HEADSET_REG_MIC_BIAS;
+	notifier.func = enable_mic_bias;
+	headset_notifier_register(&notifier);
+#endif
+
 	return 0;
 
 err_create_class_device:

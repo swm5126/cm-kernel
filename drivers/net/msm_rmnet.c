@@ -369,20 +369,24 @@ static void rmnet_tx_timeout(struct net_device *dev)
 	pr_info("rmnet_tx_timeout()\n");
 }
 
+static struct net_device_ops rmnet_ops = {
+	.ndo_open = rmnet_open,
+	.ndo_stop = rmnet_stop,
+	.ndo_start_xmit = rmnet_xmit,
+	.ndo_get_stats = rmnet_get_stats,
+	.ndo_set_multicast_list = rmnet_set_multicast_list,
+	.ndo_tx_timeout = rmnet_tx_timeout,
+};
+
 static void __init rmnet_setup(struct net_device *dev)
 {
-	dev->open = rmnet_open;
-	dev->stop = rmnet_stop;
-	dev->hard_start_xmit = rmnet_xmit;
-	dev->get_stats = rmnet_get_stats;
-	dev->set_multicast_list = rmnet_set_multicast_list;
-	dev->tx_timeout = rmnet_tx_timeout;
+	dev->netdev_ops = &rmnet_ops;
 
 	dev->watchdog_timeo = 20; /* ??? */
 
 	ether_setup(dev);
 
-	dev->change_mtu = 0; /* ??? */
+	//dev->change_mtu = 0; /* ??? */
 
 	random_ether_addr(dev->dev_addr);
 }

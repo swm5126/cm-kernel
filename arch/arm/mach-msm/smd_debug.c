@@ -43,10 +43,11 @@ struct smem_sleep_stat {
 	uint32_t garbage_pkt_cnt;
 	uint32_t zone_based_reg_cnt;
 	uint32_t idle_hand_off_cnt;
-	uint32_t reserved[7];
+	uint32_t mo_2g_probe_cnt;
+	uint32_t mo_3g_probe_cnt;
+	uint32_t reserved[5];
 };
 static struct smem_sleep_stat *sleep_stat;
-
 static struct smem_sleep_stat *get_smem_sleep_stat(void)
 {
 	return (struct smem_sleep_stat *)
@@ -63,14 +64,19 @@ static void print_sleep_stat(int flag)
 	if (!sleep_stat)
 		return;
 
-	pr_info("sleep_stat.%d: %ds %d %ds %d %d %d %d "
+	pr_info("sleep_stat.%d: %ds %d %ds %d - "
+		"%d %d %d - %d %d - %d %d %d %d %d"
 		"(%d-%02d-%02d %02d:%02d:%02d.%09lu UTC)\n",
-		flag, sleep_stat->tcxo_time >> 15, sleep_stat->tcxo_cnt,
-		sleep_stat->suspend_tcxo_time >> 15,
-		sleep_stat->suspend_tcxo_cnt, sleep_stat->garbage_pkt_cnt,
-		sleep_stat->zone_based_reg_cnt, sleep_stat->idle_hand_off_cnt,
+		flag, sleep_stat->tcxo_time, sleep_stat->tcxo_cnt,
+		sleep_stat->suspend_tcxo_time, sleep_stat->suspend_tcxo_cnt,
+		sleep_stat->garbage_pkt_cnt, sleep_stat->zone_based_reg_cnt,
+		sleep_stat->idle_hand_off_cnt, sleep_stat->mo_2g_probe_cnt,
+		sleep_stat->mo_3g_probe_cnt, sleep_stat->reserved[0],
+		sleep_stat->reserved[1], sleep_stat->reserved[2],
+		sleep_stat->reserved[3], sleep_stat->reserved[4],
 		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
 		tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec);
+
 }
 
 static int sleep_stat_suspend_notifier(struct notifier_block *nb,
@@ -200,14 +206,18 @@ static int debug_read_stat(char *buf, int max)
 			"suspend_tcxo_time: 0x%x (%ds) suspend_tcxo_cnt: %d\n"
 			"garbage_pkt_cnt: %d "
 			"zone_based_reg_cnt: %d "
-			"idle_hand_off_cnt: %d\n",
+			"idle_hand_off_cnt: %d "
+			"mo_2g_probe_cnt: %d "
+			"mo_3g_probe_cnt: %d\n",
 			sleep_stat->tcxo_time, sleep_stat->tcxo_time >> 15,
 			sleep_stat->tcxo_cnt, sleep_stat->suspend_tcxo_time,
 			sleep_stat->suspend_tcxo_time >> 15,
 			sleep_stat->suspend_tcxo_cnt,
 			sleep_stat->garbage_pkt_cnt,
 			sleep_stat->zone_based_reg_cnt,
-			sleep_stat->idle_hand_off_cnt);
+			sleep_stat->idle_hand_off_cnt,
+			sleep_stat->mo_2g_probe_cnt,
+			sleep_stat->mo_3g_probe_cnt);
 	}
 #endif
 
@@ -333,13 +343,13 @@ static void debug_create(const char *name, mode_t mode,
 	debugfs_create_file(name, mode, dent, fill, &debug_ops);
 }
 
-static void smd_debugfs_init(void)
+static int __init smd_debugfs_init(void)
 {
 	struct dentry *dent;
 
 	dent = debugfs_create_dir("smd", 0);
 	if (IS_ERR(dent))
-		return;
+		return -1;
 
 	debug_create("ch", 0444, dent, debug_read_ch);
 	debug_create("stat", 0444, dent, debug_read_stat);
@@ -354,6 +364,7 @@ static void smd_debugfs_init(void)
 #else
 	pr_info("No sleep statistics\n");
 #endif
+	return 0;
 }
 
 late_initcall(smd_debugfs_init);
@@ -386,10 +397,11 @@ void smsm_print_sleep_info(unsigned wakeup_reason_only)
 {
 	unsigned long flags;
 	uint32_t *ptr;
-	struct tramp_gpio_smem *gpio;
-	struct smsm_interrupt_info *int_info;
 #if defined(CONFIG_MSM_N_WAY_SMD)
 	struct msm_dem_slave_data *smd_int_info;
+#else
+	struct tramp_gpio_smem *gpio;
+	struct smsm_interrupt_info *int_info;
 #endif
 
 	spin_lock_irqsave(&smem_lock, flags);

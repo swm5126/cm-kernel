@@ -492,7 +492,7 @@ static int mt9d112_set_effect(int mode, int effect)
 	return rc;
 }
 
-static int mt9d112_sensor_init_probe(struct msm_camera_sensor_info *data)
+static int mt9d112_sensor_init_probe(const struct msm_camera_sensor_info *data)
 {
 	uint16_t model_id = 0;
 	int rc = 0;
@@ -564,7 +564,7 @@ init_probe_fail:
 	return rc;
 }
 
-int mt9d112_sensor_init(struct msm_camera_sensor_info *data)
+int mt9d112_sensor_init(const struct msm_camera_sensor_info *data)
 {
 	int rc = 0;
 
@@ -689,7 +689,7 @@ static struct i2c_driver mt9d112_i2c_driver = {
 		   },
 };
 
-static int mt9d112_sensor_probe(struct msm_camera_sensor_info *info,
+static int mt9d112_sensor_probe(const struct msm_camera_sensor_info *info,
 				struct msm_sensor_ctrl *s)
 {
 	int rc = i2c_add_driver(&mt9d112_i2c_driver);

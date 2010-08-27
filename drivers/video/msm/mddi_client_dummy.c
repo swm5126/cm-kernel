@@ -49,15 +49,11 @@ static int mddi_dummy_unblank(struct msm_panel_data *panel_data)
 static int mddi_dummy_probe(struct platform_device *pdev)
 {
 	struct msm_mddi_client_data *client_data = pdev->dev.platform_data;
-	struct msm_mddi_bridge_platform_data *bridge_data =
-		client_data->private_client_data;
 	struct panel_info *panel =
 		kzalloc(sizeof(struct panel_info), GFP_KERNEL);
 	int ret;
-
 	if (!panel)
 		return -ENOMEM;
-
 	platform_set_drvdata(pdev, panel);
 	panel->panel_data.suspend = mddi_dummy_suspend;
 	panel->panel_data.resume = mddi_dummy_resume;
@@ -68,7 +64,7 @@ static int mddi_dummy_probe(struct platform_device *pdev)
 	panel->pdev.id = pdev->id;
 	platform_device_add_resources(&panel->pdev,
 				      client_data->fb_resource, 1);
-	panel->panel_data.fb_data = &bridge_data->fb_data;
+	panel->panel_data.fb_data = client_data->private_client_data;
 	panel->pdev.dev.platform_data = &panel->panel_data;
 	ret = platform_device_register(&panel->pdev);
 	if (ret) {

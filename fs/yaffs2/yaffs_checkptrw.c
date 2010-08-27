@@ -358,13 +358,12 @@ int yaffs_CheckpointClose(yaffs_Device *dev)
 	if (dev->checkpointOpenForWrite) {
 		if (dev->checkpointByteOffset != 0)
 			yaffs_CheckpointFlushBuffer(dev);
-	} else if (dev->checkpointBlockList) {
+	} else if(dev->checkpointBlockList){
 		int i;
 		for (i = 0; i < dev->blocksInCheckpoint && dev->checkpointBlockList[i] >= 0; i++) {
 			int blk = dev->checkpointBlockList[i];
 			yaffs_BlockInfo *bi = NULL;
-			if (dev->internalStartBlock <= blk &&
-				blk <= dev->internalEndBlock)
+			if( dev->internalStartBlock <= blk && blk <= dev->internalEndBlock)
 				bi = yaffs_GetBlockInfo(dev, blk);
 			if (bi && bi->blockState == YAFFS_BLOCK_STATE_EMPTY)
 				bi->blockState = YAFFS_BLOCK_STATE_CHECKPOINT;
@@ -396,8 +395,7 @@ int yaffs_CheckpointInvalidateStream(yaffs_Device *dev)
 {
 	/* Erase the checkpoint data */
 
-	T(YAFFS_TRACE_CHECKPOINT,
-		(TSTR("checkpoint invalidate of %d blocks"TENDSTR),
+	T(YAFFS_TRACE_CHECKPOINT, (TSTR("checkpoint invalidate of %d blocks"TENDSTR),
 		dev->blocksInCheckpoint));
 
 	return yaffs_CheckpointErase(dev);

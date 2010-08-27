@@ -25,6 +25,7 @@ int turn_mic_bias_on(int on);
 int force_headset_speaker_on(int enable);
 int enable_aux_loopback(uint32_t enable);
 int set_aux_gain(int level);
+int enable_mos_test(int enable);
 
 #endif
 

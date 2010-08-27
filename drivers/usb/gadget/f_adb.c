@@ -30,17 +30,14 @@
 #include <linux/device.h>
 #include <linux/miscdevice.h>
 
-#include <linux/usb/ch9.h>
-#include <linux/usb/composite.h>
-#include <linux/usb/gadget.h>
-
-#include "f_adb.h"
+#include <linux/usb/android_composite.h>
+#include <mach/board.h>
 
 #define BULK_BUFFER_SIZE           4096
 
-/* number of rx and tx requests to allocate */
-#define RX_REQ_MAX 4
+/* number of tx requests to allocate */
 #define TX_REQ_MAX 4
+#define RX_REQ_MAX 32
 
 static const char shortname[] = "android_adb";
 
@@ -70,6 +67,8 @@ struct adb_dev {
 	struct usb_request *read_req;
 	unsigned char *read_buf;
 	unsigned read_count;
+
+	int maxsize;
 };
 
 static struct usb_interface_descriptor adb_interface_desc = {
@@ -126,14 +125,27 @@ static struct usb_descriptor_header *hs_adb_descs[] = {
 	NULL,
 };
 
-/* used when adb function is disabled */
-static struct usb_descriptor_header *null_adb_descs[] = {
+/* string descriptors: */
+
+static struct usb_string adb_string_defs[] = {
+	[0].s = "ADB",
+	{  } /* end of list */
+};
+
+static struct usb_gadget_strings adb_string_table = {
+	.language =		0x0409,	/* en-us */
+	.strings =		adb_string_defs,
+};
+
+static struct usb_gadget_strings *adb_strings[] = {
+	&adb_string_table,
 	NULL,
 };
 
-
 /* temporary variable used between adb_open() and adb_gadget_bind() */
 static struct adb_dev *_adb_dev;
+
+static atomic_t adb_enable_excl;
 
 static inline struct adb_dev *func_to_dev(struct usb_function *f)
 {
@@ -227,9 +239,8 @@ static void adb_complete_out(struct usb_ep *ep, struct usb_request *req)
 	if (req->status != 0) {
 		dev->error = 1;
 		req_put(dev, &dev->rx_idle, req);
-	} else {
+	} else
 		req_put(dev, &dev->rx_done, req);
-	}
 
 	wake_up(&dev->read_wq);
 }
@@ -251,6 +262,7 @@ static int __init create_bulk_endpoints(struct adb_dev *dev,
 		return -ENODEV;
 	}
 	DBG(cdev, "usb_ep_autoconfig for ep_in got %s\n", ep->name);
+	ep->driver_data = dev;		/* claim the endpoint */
 	dev->ep_in = ep;
 
 	ep = usb_ep_autoconfig(cdev->gadget, out_desc);
@@ -259,11 +271,12 @@ static int __init create_bulk_endpoints(struct adb_dev *dev,
 		return -ENODEV;
 	}
 	DBG(cdev, "usb_ep_autoconfig for adb ep_out got %s\n", ep->name);
+	ep->driver_data = dev;		/* claim the endpoint */
 	dev->ep_out = ep;
 
 	/* now allocate requests for our endpoints */
 	for (i = 0; i < RX_REQ_MAX; i++) {
-		req = adb_request_new(dev->ep_out, BULK_BUFFER_SIZE);
+		req = adb_request_new(dev->ep_out, 512);
 		if (!req)
 			goto fail;
 		req->complete = adb_complete_out;
@@ -296,6 +309,9 @@ static ssize_t adb_read(struct file *fp, char __user *buf,
 
 	DBG(cdev, "adb_read(%d)\n", count);
 
+	if (count > BULK_BUFFER_SIZE)
+		return -EINVAL;
+
 	if (_lock(&dev->read_excl))
 		return -EBUSY;
 
@@ -309,10 +325,12 @@ static ssize_t adb_read(struct file *fp, char __user *buf,
 			return ret;
 		}
 	}
-
+	if (dev->error) {
+		r = -EIO;
+		goto done;
+	}
 	while (count > 0) {
 		if (dev->error) {
-			DBG(cdev, "adb_read dev->error\n");
 			r = -EIO;
 			break;
 		}
@@ -320,25 +338,20 @@ static ssize_t adb_read(struct file *fp, char __user *buf,
 		/* if we have idle read requests, get them queued */
 		while ((req = req_get(dev, &dev->rx_idle))) {
 requeue_req:
-			req->length = BULK_BUFFER_SIZE;
+			req->length = dev->maxsize?dev->maxsize:512;
 			ret = usb_ep_queue(dev->ep_out, req, GFP_ATOMIC);
-
 			if (ret < 0) {
+				printk(KERN_INFO "adb_read: failed to queue req (%d)\n", ret);
 				r = -EIO;
 				dev->error = 1;
 				req_put(dev, &dev->rx_idle, req);
-				goto fail;
-			} else {
-				DBG(cdev, "rx %p queue\n", req);
+				goto done;
 			}
 		}
 
 		/* if we have data pending, give it to userspace */
 		if (dev->read_count > 0) {
-			if (dev->read_count < count)
-				xfer = dev->read_count;
-			else
-				xfer = count;
+			xfer = (dev->read_count < count) ? dev->read_count : count;
 
 			if (copy_to_user(buf, dev->read_buf, xfer)) {
 				r = -EFAULT;
@@ -360,7 +373,8 @@ requeue_req:
 		/* wait for a request to complete */
 		req = 0;
 		ret = wait_event_interruptible(dev->read_wq,
-			((req = req_get(dev, &dev->rx_done)) || dev->error));
+				((req = req_get(dev, &dev->rx_done)) || dev->error));
+
 		if (req != 0) {
 			/* if we got a 0-len one we need to put it back into
 			** service.  if we made it the current read req we'd
@@ -372,7 +386,6 @@ requeue_req:
 			dev->read_req = req;
 			dev->read_count = req->actual;
 			dev->read_buf = req->buf;
-			DBG(cdev, "rx %p %d\n", req, req->actual);
 		}
 
 		if (ret < 0) {
@@ -381,7 +394,7 @@ requeue_req:
 		}
 	}
 
-fail:
+done:
 	_unlock(&dev->read_excl);
 	DBG(cdev, "adb_read returning %d\n", r);
 	return r;
@@ -489,7 +502,40 @@ static struct miscdevice adb_device = {
 	.fops = &adb_fops,
 };
 
-static int __init
+static int adb_enable_open(struct inode *ip, struct file *fp)
+{
+	if (atomic_inc_return(&adb_enable_excl) != 1) {
+		atomic_dec(&adb_enable_excl);
+		return -EBUSY;
+	}
+
+	printk(KERN_INFO "enabling adb\n");
+	android_enable_function(&_adb_dev->function, 1);
+
+	return 0;
+}
+
+static int adb_enable_release(struct inode *ip, struct file *fp)
+{
+	printk(KERN_INFO "disabling adb\n");
+	android_enable_function(&_adb_dev->function, 0);
+	atomic_dec(&adb_enable_excl);
+	return 0;
+}
+
+static const struct file_operations adb_enable_fops = {
+	.owner =   THIS_MODULE,
+	.open =    adb_enable_open,
+	.release = adb_enable_release,
+};
+
+static struct miscdevice adb_enable_device = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "android_adb_enable",
+	.fops = &adb_enable_fops,
+};
+
+static int
 adb_function_bind(struct usb_configuration *c, struct usb_function *f)
 {
 	struct usb_composite_dev *cdev = c->cdev;
@@ -534,6 +580,8 @@ adb_function_unbind(struct usb_configuration *c, struct usb_function *f)
 
 	spin_lock_irq(&dev->lock);
 
+	while ((req = req_get(dev, &dev->rx_done)))
+		adb_request_free(req, dev->ep_out);
 	while ((req = req_get(dev, &dev->rx_idle)))
 		adb_request_free(req, dev->ep_out);
 	while ((req = req_get(dev, &dev->tx_idle)))
@@ -544,6 +592,7 @@ adb_function_unbind(struct usb_configuration *c, struct usb_function *f)
 	spin_unlock_irq(&dev->lock);
 
 	misc_deregister(&adb_device);
+	misc_deregister(&adb_enable_device);
 	kfree(_adb_dev);
 	_adb_dev = NULL;
 }
@@ -554,6 +603,7 @@ static int adb_function_set_alt(struct usb_function *f,
 	struct adb_dev	*dev = func_to_dev(f);
 	struct usb_composite_dev *cdev = f->config->cdev;
 	int ret;
+	struct usb_request *req;
 
 	DBG(cdev, "adb_function_set_alt intf: %d alt: %d\n", intf, alt);
 	ret = usb_ep_enable(dev->ep_in,
@@ -570,7 +620,17 @@ static int adb_function_set_alt(struct usb_function *f,
 		usb_ep_disable(dev->ep_in);
 		return ret;
 	}
-	dev->online = 1;
+	if (cdev->gadget->speed == USB_SPEED_FULL)
+		dev->maxsize = 64;
+	else
+		dev->maxsize = 512;
+	printk(KERN_INFO "%s: maxsize = %d\n", __func__, dev->maxsize);
+
+	/* retire any completed rx requests from previous session */
+	while ((req = req_get(dev, &dev->rx_done)))
+		req_put(dev, &dev->rx_idle, req);
+
+	dev->online = !dev->function.hidden;
 
 	/* readers may be blocked waiting for us to go online */
 	wake_up(&dev->read_wq);
@@ -585,6 +645,7 @@ static void adb_function_disable(struct usb_function *f)
 	DBG(cdev, "adb_function_disable\n");
 	dev->online = 0;
 	dev->error = 1;
+	dev->maxsize = 0;
 	usb_ep_disable(dev->ep_in);
 	usb_ep_disable(dev->ep_out);
 
@@ -594,13 +655,12 @@ static void adb_function_disable(struct usb_function *f)
 	VDBG(cdev, "%s disabled\n", dev->function.name);
 }
 
-int __init adb_function_add(struct usb_composite_dev *cdev,
-	struct usb_configuration *c)
+static int adb_bind_config(struct usb_configuration *c)
 {
 	struct adb_dev *dev;
 	int ret;
 
-	printk(KERN_INFO "adb_function_add\n");
+	printk(KERN_INFO "adb_bind_config\n");
 
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev)
@@ -615,18 +675,28 @@ int __init adb_function_add(struct usb_composite_dev *cdev,
 	atomic_set(&dev->read_excl, 0);
 	atomic_set(&dev->write_excl, 0);
 
+	INIT_LIST_HEAD(&dev->tx_idle);
 	INIT_LIST_HEAD(&dev->rx_idle);
 	INIT_LIST_HEAD(&dev->rx_done);
-	INIT_LIST_HEAD(&dev->tx_idle);
 
-	dev->cdev = cdev;
+	ret = usb_string_id(c->cdev);
+	if (ret < 0)
+		return ret;
+	adb_string_defs[0].id = ret;
+	adb_interface_desc.iInterface = ret;
+	dev->cdev = c->cdev;
 	dev->function.name = "adb";
-	dev->function.descriptors = null_adb_descs;
-	dev->function.hs_descriptors = null_adb_descs;
+	dev->function.strings = adb_strings;
+	dev->function.descriptors = fs_adb_descs;
+	dev->function.hs_descriptors = hs_adb_descs;
 	dev->function.bind = adb_function_bind;
 	dev->function.unbind = adb_function_unbind;
 	dev->function.set_alt = adb_function_set_alt;
 	dev->function.disable = adb_function_disable;
+	dev->maxsize = 512;
+
+	if (board_mfg_mode() != 2)
+		dev->function.hidden = 1;
 
 	/* _adb_dev must be set before calling usb_gadget_register_driver */
 	_adb_dev = dev;
@@ -634,12 +704,18 @@ int __init adb_function_add(struct usb_composite_dev *cdev,
 	ret = misc_register(&adb_device);
 	if (ret)
 		goto err1;
-	ret = usb_add_function(c, &dev->function);
+	ret = misc_register(&adb_enable_device);
 	if (ret)
 		goto err2;
 
+	ret = usb_add_function(c, &dev->function);
+	if (ret)
+		goto err3;
+
 	return 0;
 
+err3:
+	misc_deregister(&adb_enable_device);
 err2:
 	misc_deregister(&adb_device);
 err1:
@@ -648,21 +724,15 @@ err1:
 	return ret;
 }
 
-void adb_function_enable(int enable)
+static struct android_usb_function adb_function = {
+	.name = "adb",
+	.bind_config = adb_bind_config,
+};
+
+static int __init init(void)
 {
-	struct adb_dev *dev = _adb_dev;
-
-	if (dev) {
-		DBG(dev->cdev, "adb_function_enable(%s)\n",
-			enable ? "true" : "false");
-
-		if (enable) {
-			dev->function.descriptors = fs_adb_descs;
-			dev->function.hs_descriptors = hs_adb_descs;
-		} else {
-			dev->function.descriptors = null_adb_descs;
-			dev->function.hs_descriptors = null_adb_descs;
-		}
-	}
+	printk(KERN_INFO "f_adb init\n");
+	android_register_function(&adb_function);
+	return 0;
 }
-
+module_init(init);

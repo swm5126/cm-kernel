@@ -77,10 +77,8 @@ void set_ls_kvalue(struct microp_ls_info *li)
 	}
 
 	if (li->als_kadc && li->ls_config->golden_adc > 0) {
-		li->als_kadc =
-			(li->als_kadc > 0 && li->als_kadc < 0x400)
-			? li->als_kadc
-			: li->ls_config->golden_adc;
+		li->als_kadc = (li->als_kadc > 0 && li->als_kadc < 0x400) ?
+				li->als_kadc : li->ls_config->golden_adc;
 		li->als_gadc = li->ls_config->golden_adc;
 	} else {
 		li->als_kadc = 1;
@@ -150,6 +148,20 @@ static int get_ls_adc_level(uint8_t *data)
 	return 0;
 }
 
+void report_lightseneor_data(void)
+{
+	uint8_t data[3];
+	int ret;
+	struct microp_ls_info *li = ls_info;
+
+	ret = get_ls_adc_level(data);
+	if (!ret) {
+		input_report_abs(li->ls_input_dev,
+				ABS_MISC, (int)data[2]);
+		input_sync(li->ls_input_dev);
+	}
+}
+
 static int ls_microp_intr_enable(uint8_t enable)
 {
 
@@ -189,26 +201,19 @@ static void enable_intr_do_work(struct work_struct *w)
 			input_sync(li->ls_input_dev);
 		}
 	}
+
+	report_lightseneor_data();
 }
 
 static void lightsensor_do_work(struct work_struct *w)
 {
-	uint8_t data[3];
-	int ret;
-	struct microp_ls_info *li = ls_info;
-
 	/* Wait for Framework event polling ready */
 	if (ls_enable_num == 0) {
 		ls_enable_num = 1;
 		msleep(300);
 	}
 
-	ret = get_ls_adc_level(data);
-	if (!ret) {
-		input_report_abs(li->ls_input_dev,
-				ABS_MISC, (int)data[2]);
-		input_sync(li->ls_input_dev);
-	}
+	report_lightseneor_data();
 }
 
 static irqreturn_t lightsensor_irq_handler(int irq, void *data)
@@ -270,6 +275,7 @@ static int lightsensor_disable(void)
 	pr_info("%s\n", __func__);
 	ls_enable_flag = 0;
 	if (li->is_suspend) {
+		li->als_intr_enabled = 0;
 		pr_err("%s: microp is suspended\n", __func__);
 		return 0;
 	}
@@ -325,12 +331,12 @@ static long lightsensor_ioctl(struct file *file, unsigned int cmd,
 			rc = -EFAULT;
 			break;
 		}
-		printk(KERN_INFO "%s value = %d\n", __func__, val);
+		pr_info("%s set value = %d\n", __func__, val);
 		rc = val ? lightsensor_enable() : lightsensor_disable();
 		break;
 	case LIGHTSENSOR_IOCTL_GET_ENABLED:
 		val = li->als_intr_enabled;
-		pr_debug("%s enabled %d\n", __func__, val);
+		pr_info("%s get enabled status: %d\n", __func__, val);
 		rc = put_user(val, (unsigned long __user *)arg);
 		break;
 	default:
@@ -376,11 +382,8 @@ static DEVICE_ATTR(ls_adc, 0666, ls_adc_show, NULL);
 static ssize_t ls_enable_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
 {
-	struct i2c_client *client;
 	uint8_t data[2] = {0, 0};
 	int ret;
-
-	client = to_i2c_client(dev);
 
 	microp_i2c_read(MICROP_I2C_RCMD_SPI_BL_STATUS, data, 2);
 	ret = sprintf(buf, "Light sensor Auto = %d, SPI enable = %d\n",
@@ -421,8 +424,7 @@ static ssize_t ls_enable_store(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(ls_auto, 0666, \
-	ls_enable_show, ls_enable_store);
+static DEVICE_ATTR(ls_auto, 0666, ls_enable_show, ls_enable_store);
 
 static ssize_t ls_kadc_show(struct device *dev,
 				  struct device_attribute *attr, char *buf)
@@ -463,12 +465,10 @@ static ssize_t ls_kadc_store(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(ls_kadc, 0666, \
-	ls_kadc_show, ls_kadc_store);
+static DEVICE_ATTR(ls_kadc, 0666, ls_kadc_show, ls_kadc_store);
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
-static void light_sensor_suspend \
-	(struct early_suspend *h)
+static void light_sensor_suspend(struct early_suspend *h)
 {
 	struct microp_ls_info *li = ls_info;
 	int ret;
@@ -486,8 +486,7 @@ static void light_sensor_suspend \
 	ls_power(0);
 }
 
-static void light_sensor_resume \
-	(struct early_suspend *h)
+static void light_sensor_resume(struct early_suspend *h)
 {
 	struct microp_ls_info *li = ls_info;
 
@@ -507,7 +506,8 @@ static int lightsensor_probe(struct platform_device *pdev)
 	if (!li)
 		return -ENOMEM;
 	ls_info = li;
-	li->client = get_microp_client();
+	li->client = dev_get_drvdata(&pdev->dev);
+
 	if (!li->client) {
 		pr_err("%s: can't get microp i2c client\n", __func__);
 		return -1;

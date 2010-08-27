@@ -27,7 +27,9 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <mach/msm_fb.h>
-#include <mach/htc_headset_common.h>
+#ifdef CONFIG_HTC_HEADSET_MGR
+#include <mach/htc_headset_mgr.h>
+#endif
 
 #include "mdp_hw.h"
 #include "tv.h"
@@ -321,8 +323,9 @@ static void tvenc_detect_work_func(struct work_struct *work)
 
 	value = gpio_get_value(82);
 	printk("%s, TV-detection GPIO=%d\n", __func__, value);
-
+#ifdef CONFIG_HTC_HEADSET_MGR
 	switch_send_event(BIT_TV_OUT | BIT_TV_OUT_AUDIO, !!value);
+#endif
 }
 
 irqreturn_t tvenc_detect_isr(int irq, void *data)

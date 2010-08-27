@@ -23,6 +23,7 @@ struct mmc_platform_data {
 	struct embedded_sdio_data *embedded_sdio;
 	int (*register_status_notify)(void (*callback)(int card_present, void *dev_id), void *dev_id);
 	unsigned int *slot_type;
+	unsigned dat0_gpio;
 #ifdef CONFIG_MMC_SUPPORT_EXTERNEL_DRIVER
 	int use_ext_sdiodrv;
 	unsigned char *ext_sdiodrv_name;

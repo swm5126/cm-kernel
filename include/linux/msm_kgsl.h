@@ -66,6 +66,10 @@ struct kgsl_devmemstore {
 	unsigned int sbz;
 	volatile unsigned int eoptimestamp;
 	unsigned int sbz2;
+	volatile unsigned int ts_cmp_enable;
+	unsigned int sbz3;
+	volatile unsigned int ref_wait_ts;
+	unsigned int sbz4;
 };
 
 #define KGSL_DEVICE_MEMSTORE_OFFSET(field) \
@@ -86,7 +90,8 @@ enum kgsl_property_type {
 	KGSL_PROP_DEVICE_POWER    = 0x00000003,
 	KGSL_PROP_SHMEM           = 0x00000004,
 	KGSL_PROP_SHMEM_APERTURES = 0x00000005,
-	KGSL_PROP_MMU_ENABLE 	  = 0x00000006
+	KGSL_PROP_MMU_ENABLE 	  = 0x00000006,
+	KGSL_PROP_INTERRUPT_WAITS = 0x00000007,
 };
 
 struct kgsl_shadowprop {
@@ -95,6 +100,18 @@ struct kgsl_shadowprop {
 	unsigned int flags; /* contains KGSL_FLAGS_ values */
 };
 
+#ifdef CONFIG_ARCH_MSM7X30
+struct kgsl_platform_data {
+	unsigned int high_axi_2d;
+	unsigned int high_axi_3d;
+	unsigned int max_grp2d_freq;
+	unsigned int min_grp2d_freq;
+	int (*set_grp2d_async)(void);
+	unsigned int max_grp3d_freq;
+	unsigned int min_grp3d_freq;
+	int (*set_grp3d_async)(void);
+};
+#endif
 /* ioctls */
 #define KGSL_IOC_TYPE 0x09
 
@@ -109,6 +126,9 @@ struct kgsl_shadowprop {
    struct kgsl_memstore into userspace.
 */
 struct kgsl_device_getproperty {
+#ifdef CONFIG_ARCH_MSM7X30
+	unsigned int device_id;
+#endif
 	unsigned int type;
 	void  *value;
 	unsigned int sizebytes;
@@ -123,6 +143,9 @@ struct kgsl_device_getproperty {
    GPU register space.
  */
 struct kgsl_device_regread {
+#ifdef CONFIG_ARCH_MSM7X30
+	unsigned int device_id;
+#endif
 	unsigned int offsetwords;
 	unsigned int value; /* output param */
 };
@@ -135,6 +158,9 @@ struct kgsl_device_regread {
  * timeout is in milliseconds.
  */
 struct kgsl_device_waittimestamp {
+#ifdef CONFIG_ARCH_MSM7X30
+	unsigned int device_id;
+#endif
 	unsigned int timestamp;
 	unsigned int timeout;
 };
@@ -153,6 +179,9 @@ struct kgsl_device_waittimestamp {
  * the GPU.
  */
 struct kgsl_ringbuffer_issueibcmds {
+#ifdef CONFIG_ARCH_MSM7X30
+	unsigned int device_id;
+#endif
 	unsigned int drawctxt_id;
 	unsigned int ibaddr;
 	unsigned int sizedwords;
@@ -167,6 +196,9 @@ struct kgsl_ringbuffer_issueibcmds {
  * type should be a value from enum kgsl_timestamp_type
  */
 struct kgsl_cmdstream_readtimestamp {
+#ifdef CONFIG_ARCH_MSM7X30
+	unsigned int device_id;
+#endif
 	unsigned int type;
 	unsigned int timestamp; /*output param */
 };
@@ -180,6 +212,9 @@ struct kgsl_cmdstream_readtimestamp {
  * type should be a value from enum kgsl_timestamp_type
  */
 struct kgsl_cmdstream_freememontimestamp {
+#ifdef CONFIG_ARCH_MSM7X30
+	unsigned int device_id;
+#endif
 	unsigned int gpuaddr;
 	unsigned int type;
 	unsigned int timestamp;
@@ -192,6 +227,9 @@ struct kgsl_cmdstream_freememontimestamp {
  * The flags field may contain a mask KGSL_CONTEXT_*  values
  */
 struct kgsl_drawctxt_create {
+#ifdef CONFIG_ARCH_MSM7X30
+	unsigned int device_id;
+#endif
 	unsigned int flags;
 	unsigned int drawctxt_id; /*output param */
 };
@@ -201,6 +239,9 @@ struct kgsl_drawctxt_create {
 
 /* destroy a draw context */
 struct kgsl_drawctxt_destroy {
+#ifdef CONFIG_ARCH_MSM7X30
+	unsigned int device_id;
+#endif
 	unsigned int drawctxt_id;
 };
 
@@ -271,10 +312,36 @@ struct kgsl_sharedmem_from_vmalloc {
 	_IOW(KGSL_IOC_TYPE, 0x24, struct kgsl_sharedmem_free)
 
 struct kgsl_drawctxt_set_bin_base_offset {
+#ifdef CONFIG_ARCH_MSM7X30
+	unsigned int device_id;
+#endif
 	unsigned int drawctxt_id;
 	unsigned int offset;
 };
 
 #define IOCTL_KGSL_DRAWCTXT_SET_BIN_BASE_OFFSET \
 	_IOW(KGSL_IOC_TYPE, 0x25, struct kgsl_drawctxt_set_bin_base_offset)
+
+enum kgsl_cmdwindow_type {
+	KGSL_CMDWINDOW_MIN     = 0x00000000,
+	KGSL_CMDWINDOW_2D      = 0x00000000,
+	KGSL_CMDWINDOW_3D      = 0x00000001, /* legacy */
+	KGSL_CMDWINDOW_MMU     = 0x00000002,
+	KGSL_CMDWINDOW_ARBITER = 0x000000FF,
+	KGSL_CMDWINDOW_MAX     = 0x000000FF,
+};
+
+/* write to the command window */
+struct kgsl_cmdwindow_write {
+#ifdef CONFIG_ARCH_MSM7X30
+	unsigned int device_id;
+#endif
+	enum kgsl_cmdwindow_type target;
+	unsigned int addr;
+	unsigned int data;
+};
+
+#define IOCTL_KGSL_CMDWINDOW_WRITE \
+	_IOW(KGSL_IOC_TYPE, 0x2e, struct kgsl_cmdwindow_write)
+
 #endif /* _MSM_KGSL_H */

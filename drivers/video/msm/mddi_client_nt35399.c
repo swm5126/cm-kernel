@@ -19,6 +19,7 @@
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
+#include <linux/sched.h>
 #include <linux/gpio.h>
 #include <mach/msm_fb.h>
 
@@ -34,7 +35,7 @@ struct panel_info {
 	int nt35399_got_int;
 };
 
-static void 
+static void
 nt35399_request_vsync(struct msm_panel_data *panel_data,
 		      struct msmfb_callback *callback)
 {
@@ -54,13 +55,13 @@ static void nt35399_wait_vsync(struct msm_panel_data *panel_data)
 	struct panel_info *panel = container_of(panel_data, struct panel_info,
 						panel_data);
 	struct msm_mddi_client_data *client_data = panel->client_data;
-	
+
 	if (panel->nt35399_got_int) {
 		panel->nt35399_got_int = 0;
 		client_data->activate_link(client_data); /* clears interrupt */
 	}
 
-	if (wait_event_timeout(nt35399_vsync_wait, panel->nt35399_got_int, 
+	if (wait_event_timeout(nt35399_vsync_wait, panel->nt35399_got_int,
 				HZ/2) == 0)
 		printk(KERN_ERR "timeout waiting for VSYNC\n");
 
@@ -77,7 +78,7 @@ static int nt35399_suspend(struct msm_panel_data *panel_data)
 	struct msm_mddi_bridge_platform_data *bridge_data =
 		client_data->private_client_data;
 	int ret;
-	
+
 	ret = bridge_data->uninit(bridge_data, client_data);
 	if (ret) {
 		printk(KERN_INFO "mddi nt35399 client: non zero return from "
@@ -132,7 +133,7 @@ irqreturn_t nt35399_vsync_interrupt(int irq, void *data)
 	struct panel_info *panel = data;
 
 	panel->nt35399_got_int = 1;
-	
+
 	if (panel->fb_callback) {
 		panel->fb_callback->func(panel->fb_callback);
 		panel->fb_callback = NULL;
@@ -164,12 +165,12 @@ static int setup_vsync(struct panel_info *panel, int init)
 	ret = irq = gpio_to_irq(gpio);
 	if (ret < 0)
 		goto err_get_irq_num_failed;
-	
+
 	ret = request_irq(irq, nt35399_vsync_interrupt, IRQF_TRIGGER_RISING,
 			  "vsync", panel);
 	if (ret)
 		goto err_request_irq_failed;
-	
+
 	printk(KERN_INFO "vsync on gpio %d now %d\n",
 	       gpio, gpio_get_value(gpio));
 	return 0;
@@ -187,17 +188,16 @@ err_request_gpio_failed:
 static int mddi_nt35399_probe(struct platform_device *pdev)
 {
 	struct msm_mddi_client_data *client_data = pdev->dev.platform_data;
-	struct msm_mddi_bridge_platform_data *bridge_data = 
+	struct msm_mddi_bridge_platform_data *bridge_data =
 		client_data->private_client_data;
 
 	int ret;
 
-	struct panel_info *panel = kzalloc(sizeof(struct panel_info), 
+	struct panel_info *panel = kzalloc(sizeof(struct panel_info),
 					   GFP_KERNEL);
-	
+
 	printk(KERN_DEBUG "%s: enter.\n", __func__);
-	
-	
+
 	if (!panel)
 		return -ENOMEM;
 	platform_set_drvdata(pdev, panel);
@@ -223,7 +223,7 @@ static int mddi_nt35399_probe(struct platform_device *pdev)
 	panel->pdev.resource = client_data->fb_resource;
 	panel->pdev.num_resources = 1;
 	panel->pdev.dev.platform_data = &panel->panel_data;
-	
+
 	if (bridge_data->init)
 		bridge_data->init(bridge_data, client_data);
 

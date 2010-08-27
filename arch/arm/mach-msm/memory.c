@@ -1,7 +1,6 @@
 /* arch/arm/mach-msm/memory.c
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2009, Code Aurora Forum. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -50,7 +49,6 @@ void write_to_strongly_ordered_memory(void)
 	map_zero_page_strongly_ordered();
 	*(int *)zero_page_strongly_ordered = 0;
 }
-
 void flush_axi_bus_buffer(void)
 {
 	__asm__ __volatile__ ("mcr p15, 0, %0, c7, c10, 5" \
@@ -110,32 +108,4 @@ void invalidate_caches(unsigned long vstart,
 	asm ("mcr p15, 0, %0, c7, c5, 0" : : "r" (0));
 
 	flush_axi_bus_buffer();
-}
-
-void *alloc_bootmem_aligned(unsigned long size, unsigned long alignment)
-{
-	void *unused_addr = NULL;
-	unsigned long addr, tmp_size, unused_size;
-
-	/* Allocate maximum size needed, see where it ends up.
-	 * Then free it -- in this path there are no other allocators
-	 * so we can depend on getting the same address back
-	 * when we allocate a smaller piece that is aligned
-	 * at the end (if necessary) and the piece we really want,
-	 * then free the unused first piece.
-	 */
-
-	tmp_size = size + alignment - PAGE_SIZE;
-	addr = (unsigned long)alloc_bootmem(tmp_size);
-	free_bootmem(__pa(addr), tmp_size);
-
-	unused_size = alignment - (addr % alignment);
-	if (unused_size)
-		unused_addr = alloc_bootmem(unused_size);
-
-	addr = (unsigned long)alloc_bootmem(size);
-	if (unused_size)
-		free_bootmem(__pa(unused_addr), unused_size);
-
-	return (void *)addr;
 }

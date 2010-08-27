@@ -126,7 +126,7 @@ void set_speaker_amp(int on)
 		mdelay(5); /* According to TPA2018D1 Spec */
 		if (tpa2018_i2c_write(SPK_AMP_CFG, sizeof(SPK_AMP_CFG)) == 0) {
 			last_spkamp_state = 1;
-			pr_info("%s: ON\n", __func__);
+			pr_info("%s: ON, value = %x %x\n", __func__, SPK_AMP_CFG[0], SPK_AMP_CFG[1]);
 		}
 	} else if (!on && last_spkamp_state) {
 		if (tpa2018_i2c_write(SPK_AMP_0FF, sizeof(SPK_AMP_0FF)) == 0) {
@@ -300,7 +300,6 @@ err_alloc_data_failed:
 static int tpa2018d1_remove(struct i2c_client *client)
 {
 	struct tpa2018d1_platform_data *p2018data = i2c_get_clientdata(client);
-	i2c_detach_client(client);
 	kfree(p2018data);
 
 	return 0;

@@ -83,7 +83,6 @@ static struct {
 	int mask;
 	int level;
 } mmc_vdd_table[] = {
-	{ MMC_VDD_27_28,	2800 },
 	{ MMC_VDD_28_29,	2850 },
 	{ MMC_VDD_29_30,	2900 },
 };
@@ -143,8 +142,7 @@ static unsigned int incrediblec_sdslot_status(struct device *dev)
 	return !gpio_get_value(INCREDIBLEC_GPIO_SDMC_CD_N);
 }
 
-#define INCREDIBLEC_MMC_VDD	(MMC_VDD_27_28 | MMC_VDD_28_29 | \
-				 MMC_VDD_29_30)
+#define INCREDIBLEC_MMC_VDD	(MMC_VDD_28_29 | MMC_VDD_29_30)
 
 static unsigned int incrediblec_sdslot_type = MMC_TYPE_SD;
 
@@ -285,6 +283,7 @@ int __init incrediblec_init_mmc(unsigned int sys_rev)
 	/* initial WIFI_SHUTDOWN# */
 	id = PCOM_GPIO_CFG(INCREDIBLEC_GPIO_WIFI_SHUTDOWN_N, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_2MA),
 	msm_proc_comm(PCOM_RPC_GPIO_TLMM_CONFIG_EX, &id, 0);
+	gpio_set_value(INCREDIBLEC_GPIO_WIFI_SHUTDOWN_N, 0);
 
 	msm_add_sdcc(1, &incrediblec_wifi_data, 0, 0);
 

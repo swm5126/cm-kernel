@@ -184,6 +184,13 @@ struct ept_queue_item {
 #define ULPI_DATA(n)          ((n) & 255)
 #define ULPI_DATA_READ(n)     (((n) >> 8) & 255)
 
+#define ULPI_DEBUG_REG        (0x15)
+#define ULPI_SCRATCH_REG      (0x16)
+
+#define ULPI_FUNC_CTRL_CLR    (0x06)
+#define   ULPI_FUNC_SUSPENDM  (1 << 6)
+
+
 /* USB_PORTSC bits for determining port speed */
 #define PORTSC_PSPD_FS        (0 << 26)
 #define PORTSC_PSPD_LS        (1 << 26)
@@ -213,7 +220,6 @@ struct ept_queue_item {
 #define PORTSC_LS              (3 << 10) /* Read - Port's Line status */
 #define PORTSC_PHCD            (1 << 23) /* phy suspend mode */
 #define PORTSC_CCS             (1 << 0)  /* current connect status */
-#define PORTSC_PORT_RESET      0x00000100
 #define PORTSC_PTS              (3 << 30)
 #define PORTSC_PTS_ULPI         (2 << 30)
 #define PORTSC_PTS_SERIAL       (3 << 30)
@@ -232,7 +238,17 @@ struct ept_queue_item {
 #define PORTSC_PTC_SE0_NAK	(0x03 << 16)
 #define PORTSC_PTC_TST_PKT	(0x04 << 16)
 
+#define PORTSC_PTS_MASK       (3 << 30)
+#define PORTSC_PTS_ULPI       (2 << 30)
+#define PORTSC_PTS_SERIAL     (3 << 30)
+
+#define PORTSC_CCS             (1 << 0)  /* current connect status */
+#define PORTSC_FPR             (1 << 6)  /* R/W - State normal => suspend */
+#define PORTSC_SUSP            (1 << 7)  /* Read - Port in suspend state */
+#define PORTSC_PORT_RESET      (1 << 8)
+#define PORTSC_LS              (3 << 10) /* Read - Port's Line status */
+#define PORTSC_PHCD            (1 << 23) /* phy suspend mode */
+
 #define ULPI_DEBUG               0x15
-#define ULPI_FUNC_CTRL_CLR       0x06
 #define ULPI_SUSPENDM            (1 << 6)
 #endif /* _USB_FUNCTION_MSM_HSUSB_HW_H */

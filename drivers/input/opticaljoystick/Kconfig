@@ -12,8 +12,23 @@ menuconfig INPUT_OPTICALJOYSTICK
 if INPUT_OPTICALJOYSTICK
 
 config OPTICALJOYSTICK_CRUCIAL
-	tristate "Crucial Optical Joystick"
+	boolean
+
+choice
+	prompt "Interface"
+
+config OPTICALJOYSTICK_CRUCIAL_uP
+	boolean "Crucial Optical Joystick (microP)"
 	depends on MICROP_COMMON
+	select OPTICALJOYSTICK_CRUCIAL
 	help
+
+config OPTICALJOYSTICK_CRUCIAL_SPI
+	boolean "Crucial Optical Joystick (SPI)"
+	depends on SPI_CRUCIAL_OJ
+	select OPTICALJOYSTICK_CRUCIAL
+	help
+
+endchoice
 
 endif

@@ -324,6 +324,24 @@ static void qmi_process_unicast_wds_msg(struct qmi_ctxt *ctxt,
 		if (qmi_get_status(msg, &err)) {
 			printk(KERN_ERR
 			       "qmi: wds: network start failed (%04x)\n", err);
+			//++Make pdp state always be sent to QMI channel when activating PDP context fails
+			printk(KERN_ERR
+					"qmi: wds: Make pdp state always be sent to QMI channel when activating PDP context fails .\n");
+			ctxt->state = STATE_OFFLINE;
+			ctxt->state_dirty = 1;
+			//--Make pdp state always be sent to QMI channel when activating PDP context fails
+			if (msg->size == 0x000c && (msg->tlv)[10] == 0x0b) {
+				printk(KERN_ERR
+					"qmi: wds: pdp activation collided with CCFC\n");
+				ctxt->state = STATE_OFFLINE;
+				ctxt->state_dirty = 1;
+			}
+			if (msg->size == 0x000c && (msg->tlv)[10] == 0x0c) {
+				printk(KERN_ERR
+					"qmi: wds: pdp activation failed. Cause: Operator-determined barring\n");
+				ctxt->state = STATE_OFFLINE;
+				ctxt->state_dirty = 1;
+			}
 		} else if (qmi_get_tlv(msg, 0x01, sizeof(ctxt->wds_handle), &ctxt->wds_handle)) {
 			printk(KERN_INFO
 			       "qmi: wds no handle?\n");

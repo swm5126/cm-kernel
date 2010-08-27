@@ -19,6 +19,11 @@ config ARCH_MSM7227
         select ARCH_MSM_ARM11
         select CPU_V6
 
+config ARCH_MSM7X30
+	bool "MSM7x30"
+	select ARCH_MSM_SCORPION
+	select CPU_V7
+
 config ARCH_QSD8X50
 	bool "QSD8x50"
 	select ARCH_MSM_SCORPION
@@ -51,7 +56,12 @@ config MSM_MDP302
 
 config MSM_MDP31
 	bool
-	depends on ARCH_QSD8X50
+	depends on ARCH_QSD8X50 || ARCH_MSM7X30
+	default y
+
+config MSM_MDP40
+	bool
+	depends on ARCH_MSM7X30
 	default y
 
 config TURBO_MODE
@@ -64,13 +74,13 @@ config TURBO_MODE
 
 config PERFLOCK
 	depends on CPU_FREQ
-	depends on ARCH_QSD8X50 || ARCH_MSM7X00A || ARCH_MSM7227 || ARCH_MSM7225
+	depends on ARCH_QSD8X50 || ARCH_MSM7X30 || ARCH_MSM7X00A || ARCH_MSM7227 || ARCH_MSM7225
 	default n
 	bool "HTC Performance Lock"
 
 config PERFLOCK_BOOT_LOCK
 	depends on PERFLOCK
-	depends on ARCH_QSD8X50 || ARCH_MSM7X00A || ARCH_MSM7227 || ARCH_MSM7225
+	depends on ARCH_QSD8X50 || ARCH_MSM7X30 || ARCH_MSM7X00A || ARCH_MSM7227 || ARCH_MSM7225
 	default n
 	bool "Boot Time Performance Lock"
 
@@ -112,6 +122,8 @@ config MSM_AMSS_VERSION
 	default 4735 if MSM_AMSS_VERSION_4735
 	default 4410 if MSM_AMSS_VERSION_4410
 	default 3200 if MSM_AMSS_VERSION_3200
+	default 1170 if MSM_AMSS_VERSION_1170
+	default 1200 if MSM_AMSS_VERSION_1200
 choice
 	prompt "AMSS modem firmware version"
 
@@ -146,11 +158,13 @@ choice
 
 	config MSM_AMSS_VERSION_3200
 		bool "3.2.00"
+
+	config MSM_AMSS_VERSION_1170
+		bool "1.1.70"
+
+	config MSM_AMSS_VERSION_1200
+		bool "1.2.00"
 endchoice
-config MSM_AMSS_SUPPORT_256MB_EBI1
-	depends on MSM_AMSS_VERSION_6355 && MACH_SAPPHIRE
-	default y
-	bool "AMSS that support unified 128MB and 256MB EBI1"
 
 config MSM_DEBUG_UART
 	int
@@ -176,6 +190,14 @@ choice
 		bool "UART3"
 endchoice
 
+config ARCH_MSM7230
+	bool "MSM7230"
+	depends on ARCH_MSM7X30
+
+config ARCH_MSM7630
+	bool "MSM7630"
+	depends on ARCH_MSM7X30
+
 comment "MSM Board Type"
 
 config MACH_HALIBUT
@@ -194,17 +216,10 @@ config MACH_TROUT
 
 config MACH_SWORDFISH
 	depends on ARCH_QSD8X50
-	default y
+	default n
 	bool "Swordfish Board (QCT SURF8250)"
 	help
 	  Support for the Qualcomm SURF8250 eval board.
-
-config MACH_FIRESTONE
-	depends on ARCH_QSD8X50
-	default y
-	bool "Firestone"
-	help
-	  Support for the HTC Firestone device.
 
 config MACH_SAPPHIRE
 	depends on ARCH_MSM7X00A
@@ -321,7 +336,7 @@ config MACH_PARADISE
 
 config MACH_BAHAMAS
 	depends on ARCH_MSM7225
-	default y
+	default n
 	bool "Bahamas"
 	help
 	  Support for Bahamas (PDA phone).
@@ -347,9 +362,65 @@ config MACH_LIBERTY
 	help
 	  Support for Liberty (PDA phone).
 
+config MACH_VISION
+       depends on ARCH_MSM7X30
+       depends on !MSM_STACKED_MEMORY
+       default n
+       bool "MSM7x30 VISION"
+       help
+         Support for the Qualcomm MSM7x30 Vision board.
+
+config MACH_LEXIKON
+       depends on ARCH_MSM7X30
+       depends on !MSM_STACKED_MEMORY
+       default n
+       bool "MSM7x30 LEXIKON"
+       help
+         Support for the Qualcomm MSM7x30 Lexikon board.
+
+config MACH_SPEEDY
+       depends on ARCH_MSM7X30
+       depends on !MSM_STACKED_MEMORY
+       default n
+       bool "MSM7x30 SPEEDY"
+       help
+         Support for the Qualcomm MSM7x30 Speedy board.
+
+config MACH_MECHA
+       depends on ARCH_MSM7X30
+       depends on !MSM_STACKED_MEMORY
+       default n
+       bool "MSM7x30 MECHA"
+       help
+         Support for the Qualcomm MSM7x30 Mecha board.
+
+config MACH_BLITZC
+       depends on ARCH_MSM7X30
+       depends on !MSM_STACKED_MEMORY
+       depends on MACH_MECHA
+       default n
+       bool "MSM7x30 BLITZC"
+       help
+         Support for the Qualcomm MSM7x30 Blitz#C board.
+
+config MACH_GLACIER
+       depends on ARCH_MSM7X30
+       depends on !MSM_STACKED_MEMORY
+       default n
+       bool "MSM7x30 GLACIER"
+       help
+         Support for the Qualcomm MSM7x30 Glacier board.
+
+config MACH_SPADE
+       depends on ARCH_MSM7X30
+       depends on !MSM_STACKED_MEMORY
+       default n
+       bool "MSM7x30 SPADE"
+       help
+         Support for the Qualcomm MSM7x30 Spade board.
 
 config TROUT_BATTCHG
-	depends on MSM_ONCRPCROUTER && POWER_SUPPLY
+	depends on MACH_TROUT && POWER_SUPPLY
 	default n
 	bool "Trout battery / charger driver"
 
@@ -378,6 +449,10 @@ config HTC_POWER_COLLAPSE_MAGIC
 	default n
 	bool "Check Power Collapse State"
 
+config SMEM_RPC_SERVER_STATE
+	default n
+	bool "Set RPC Server State in SMEM"
+
 config BUILD_OMA_DM
         bool "Build in OMA-DM fixes"
         default n
@@ -405,7 +480,7 @@ choice
 		bool "DG Timer"
 	help
 	  High resolution timer.
-endchoice
+endchoice	  
 
 choice
 	prompt "Suspend sleep mode"
@@ -432,7 +507,7 @@ choice
 
 	config MSM7X00A_SLEEP_WAIT_FOR_INTERRUPT
 		bool "Wait for interrupt"
-endchoice
+endchoice	  
 
 config MSM7X00A_SLEEP_MODE
 	int
@@ -467,7 +542,7 @@ choice
 
 	config MSM7X00A_IDLE_SLEEP_WAIT_FOR_INTERRUPT
 		bool "Wait for interrupt"
-endchoice
+endchoice	  
 
 config MSM7X00A_IDLE_SLEEP_MODE
 	int
@@ -621,7 +696,7 @@ config MSM_SMD
 	  processor.
 
 config MSM_N_WAY_SMD
-	depends on (MSM_SMD && (ARCH_QSD8X50 || ARCH_MSM7227))
+	depends on (MSM_SMD && (ARCH_QSD8X50 || ARCH_MSM7X30 || ARCH_MSM7227))
 	default y
 	bool "MSM N-WAY SMD support"
 	help
@@ -643,9 +718,17 @@ config MSM_RPCSERVERS
 	help
 	  none
 
+config MSM_RMT_STORAGE_SERVER
+	depends on (ARCH_MSM && MSM_ONCRPCROUTER)
+	default n
+	bool "Remote Storage RPC server"
+	help
+	  Provide RPC mechanism for remote processors to access storage
+	  device on apps processor.
+
 config MSM_DALRPC
 	bool "DAL RPC support"
-	depends on ARCH_QSD8X50
+	depends on (ARCH_QSD8X50 || ARCH_MSM7X30)
 	default y
 	help
 	  Supports RPC calls to DAL devices on remote processor cores.
@@ -701,19 +784,18 @@ config MSM_HW3D_EARLYSUSPEND_ENABLED
 
 if !ARCH_QSD8X50
 config MSM_ADSP
-	tristate "MSM ADSP driver"
-	default y
 	depends on MSM_AMSS_VERSION_6210 || MSM_AMSS_VERSION_6220 || MSM_AMSS_VERSION_6225 || \
 		   MSM_AMSS_VERSION_6350
-
+	tristate "MSM ADSP driver"
+	default y
 	help
 	  Provides access to registers needed by the userspace aDSP library.
 
 config MSM_ADSP_COMP
-	tristate "MSM ADSP support init info by RPC"
-	default y
 	depends on MSM_AMSS_VERSION_6355 || MSM_AMSS_VERSION_1355 || MSM_AMSS_VERSION_4725 || \
 		   MSM_AMSS_VERSION_4735 || MSM_AMSS_VERSION_4410
+	tristate "MSM ADSP support init info by RPC"
+	default y
 	help
 	  Provides access to registers needed by the userspace aDSP library.
 endif
@@ -736,10 +818,25 @@ config HTC_ACOUSTIC_QSD
 config MSM_ADSP_REPORT_EVENTS
 	bool "Report modem events from the DSP"
 	default y
-	depends on MSM_ADSP
+	depends on (MSM_ADSP || MSM7KV2_AUDIO)
 	help
 	  Normally, only messages from the aDSP are reported to userspace.
 	  With this option, we report events from the aDSP as well.
+
+config MSM7KV2_AUDIO
+        bool "MSM7K v2 audio"
+        depends on (ARCH_MSM7X30 && ANDROID_PMEM)
+        default y
+        help
+          Enables QDSP5V2-based audio drivers for audio playbacks and
+          voice call.
+
+config MSM_QDSP6
+	tristate "QDSP6 support"
+	depends on ARCH_QSD8X50
+	default n
+	help
+	  Enable support for qdsp6. This provides audio and video functionality.
 
 config MSM_CLOCK_CTRL_DEBUG
 	bool "Enable debugfs interface for clock control"
@@ -749,54 +846,11 @@ config MSM_CLOCK_CTRL_DEBUG
 	  When this option is enabled, the clock rate control interface
 	  is exported through debugfs. Use this at your own risk!
 
-config HTC_HEADSET
-	tristate "HTC 2 Wire detection driver"
-	depends on MICROP_COMMON
-	default n
-	help
-	  Provides support for detecting HTC 2 wire devices, such as wired
-	  headset, on the trout platform. Can be used with the msm serial
-	  debugger, but not with serial console.
-
-config HTC_AUDIOJACK
-	tristate "Audio Jack detection driver"
-	depends on HTC_HEADSET
-	default n
-	help
-	  Provides support for detecting audio jack, such as 3.5mm
-	  earphone, on the android platform.
-
-config HTC_HEADSET_V1
-	tristate "HTC 2 Wire detection driver"
-	depends on MICROP_I2C
-	default n
-	help
-	  Provides support for detecting HTC 2 wire devices, such as wired
-	  headset, on the trout platform. Can be used with the msm serial
-	  debugger, but not with serial console.
-
-config HTC_35MM_REMOTE_V1
-	tristate "HTC 2 Wire detection driver"
-	depends on MICROP_I2C
-	default n
-	help
-	  Provides support for detecting HTC 2 wire devices, such as wired
-	  headset, on the trout platform. Can be used with the msm serial
-	  debugger, but not with serial console.
-
-config HTC_AUDIOJACK_V1
-	tristate "Audio Jack detection driver"
-	depends on HTC_HEADSET_V1 || HTC_35MM_REMOTE_V1
-	default n
-	help
-	  Provides support for detecting audio jack, such as 3.5mm
-	  earphone, on the android platform.
-
 config WIFI_CONTROL_FUNC
 	bool "Enable WiFi control function abstraction"
 	help
 	  Enables Power/Reset/Carddetect function abstraction
-
+	
 config WIFI_MEM_PREALLOC
 	depends on WIFI_CONTROL_FUNC
 	bool "Preallocate memory for WiFi buffers"
@@ -839,7 +893,7 @@ config VIRTUAL_KPANIC_PSIZE
 	int "Default kpanic partition size"
 	default 1048576
 	help
-		Sets the size of the virtual kpanic paritition to create.
+	  Sets the size of the virtual kpanic paritition to create.
 
 config QSD_HTC_FM
 	bool "QSD HTC FM"
@@ -849,24 +903,57 @@ config QSD_HTC_FM
 	  HTC FM driver for QSD
 
 config ARCH_MSM_FLASHLIGHT
-	bool "Flashlight Driver for MSM series"
-	depends on ARCH_MSM
-	default n
-	help
-	  The flashlight driver is for MSM series.
+        bool "Flashlight Driver"
+        depends on ARCH_MSM
+        help
+          The flashlight driver is for MSM series.
 
 config VIRTUAL_KPANIC_SRC
 	depends on VIRTUAL_KPANIC_PARTITION
 	string "Partition to steal from"
 	default "cache"
 	help
-		Sets the partition to steal from to make the virtual one.
+	  Sets the partition to steal from to make the virtual one.
 
 config MICROP_COMMON
 	tristate "MICROP COMMON Driver"
 	depends on I2C
 	help
 	  HTC Microp-P support.
+
+config HTC_HEADSET_MGR
+	tristate "HTC headset manager driver"
+	default n
+	help
+	  Provides support of HTC headset manager.
+
+config HTC_HEADSET_H2W
+	tristate "HTC 2 Wire headset driver"
+	depends on HTC_HEADSET_MGR
+	default n
+	help
+	  Provides support of HTC 2 Wire headset.
+
+config HTC_HEADSET_GPIO
+	tristate "HTC GPIO headset detection driver"
+	depends on HTC_HEADSET_MGR
+	default n
+	help
+	  Provides support of HTC GPIO headset detection.
+
+config HTC_HEADSET_MICROP
+	tristate "HTC Micro-P headset detection driver"
+	depends on HTC_HEADSET_MGR && MICROP_COMMON
+	default n
+	help
+	  Provides support of HTC Micro-P headset detection.
+
+config HTC_HEADSET_PMIC
+	tristate "HTC PMIC headset detection driver"
+	depends on HTC_HEADSET_MGR
+	default n
+	help
+	  Provides support of HTC PMIC headset detection.
 
 config BUILD_CIQ
         bool "Build in CIQ fixes"
@@ -878,11 +965,10 @@ endif
 
 config SMD_OFFSET_TCXO_STAT
 	depends on MSM_SMD
-        depends on ARCH_QSD8X50 || ARCH_MSM7X00A || ARCH_MSM7227 || ARCH_MSM7225
-        hex "SMD offset of accumulated tcxo off time"
-        default 0x0
-        help
-                TCXO off time is in tick of sleep clock, 1/32768.
+	hex "SMD offset of total TCXO-off time"
+	default 0x0
+	help
+          TCXO off time is in tick of sleep clock, 1/32768.
 
 config AXI_SCREEN_POLICY
         depends on ARCH_QSD8X50 || ARCH_MSM7X00A || ARCH_MSM7227 || ARCH_MSM7225
@@ -891,3 +977,62 @@ config AXI_SCREEN_POLICY
 	default n
 	help
 		Simple AXI scaling based on screen ON/OFF and PWRC.
+
+config MSM_NPA
+	bool "Node Power Architecture(NPA) support"
+	default y if ARCH_MSM7X30
+	help
+	  Enable support for Node Power Architecture for aggressive
+	  resource power management. NPA provides an interface for resources
+	  to export their parameters and clients to request a value. The
+	  resources have additional facility to aggreate requests, calculate
+	  the resultant value, apply the value and notify the clients of
+	  change in state.
+
+config MSM_NPA_LOG
+	bool "Node Power Architecture(NPA) logging support"
+	depends on MSM_NPA
+	default y
+	help
+	  Enable logging support for NPA.
+
+config MSM_NPA_DEBUG
+	bool "Node Power Architecture(NPA) debug support"
+	depends on MSM_NPA
+	default n
+	help
+	  Exports functions that can debug or reset NPA internal
+	  data structures.
+
+config MSM_NPA_REMOTE
+	bool "Node Power Architecture(NPA) remoting"
+	depends on MSM_NPA
+	default n
+	help
+	  Enables Linux NPA clients to talk to NPA nodes across
+	  processor boundary.
+
+config MSM_NPA_REMOTE_ONCRPC
+	bool "Enables NPA remoting through ONCRPC protocol."
+	depends on MSM_NPA && MSM_ONCRPCROUTER
+	select MSM_NPA_REMOTE
+	default n
+	help
+	  Enables Linux NPA clients to talk to NPA nodes in the modem
+	  using ONCRPC communication protocol.
+
+config MSM_NPA_SYSTEM_BUS
+	bool "NPA-managed System Bus (AXI) rates through PM_QOS."
+	depends on MSM_NPA_REMOTE
+	default n
+	help
+	  PM_QOS System Bus rate requests are interpreted as 'Flow IDs' and
+	  are routed through the NPA framework.
+
+config MSM_SSBI
+	tristate "SSBI support"
+	depends on ARCH_MSM7X30
+	default y
+	help
+	  Enable support for SSBI bus. This is required for communicatinig with
+	  Qualcomm PMICs and Audio codecs.

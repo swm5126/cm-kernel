@@ -88,13 +88,27 @@
 #define SPKR_ADD_RIGHT_LEFT_CHAN_PROC 60
 #define SPKR_SET_GAIN_PROC 61
 #define SPKR_EN_PROC 62
-
+#define HSED_ENABLE_PROC 66
+#define HIGH_CURRENT_LED_SET_CURRENT_PROC 67
+#define HIGH_CURRENT_LED_SET_POLARITY_PROC 68
+#define HIGH_CURRENT_LED_SET_MODE_PROC 69
+#define LP_FORCE_LPM_CONTROL_PROC 70
+#define LOW_CURRENT_LED_SET_EXT_SIGNAL_PROC 71
+#define LOW_CURRENT_LED_SET_CURRENT_PROC 72
 
 /* rpc related */
 #define PMIC_RPC_TIMEOUT (5*HZ)
 
 #define PMIC_RPC_PROG	0x30000061
+#ifdef CONFIG_ARCH_MSM7X30 /* TO.606 need audio team help to review */
+#define PMIC_RPC_VER_1_1	0x00010001
+#define PMIC_RPC_VER_2_1	0x00020001
+#if (CONFIG_MSM_AMSS_VERSION >= 1200)
+#define PMIC_RPC_VER_3_1	0x00030001
+#endif
+#else
 #define PMIC_RPC_VER	0x00010001
+#endif
 
 /* error bit flags defined by modem side */
 #define PM_ERR_FLAG__PAR1_OUT_OF_RANGE		(0x0001)
@@ -155,6 +169,24 @@ static int pmic_rpc(int proc, void *msg, int msglen, void *rep, int replen)
 	int r;
 	mutex_lock(&pmic_mutex);
 
+#ifdef CONFIG_ARCH_MSM7X30 /* TODO.606 need audio team help to review */
+#if (CONFIG_MSM_AMSS_VERSION >= 1200)
+	if (!pmic_ept) {
+		pmic_ept = msm_rpc_connect(PMIC_RPC_PROG, PMIC_RPC_VER_3_1, 0);
+#endif
+		if (!pmic_ept) {
+			pmic_ept = msm_rpc_connect(PMIC_RPC_PROG, PMIC_RPC_VER_2_1, 0);
+			if (!pmic_ept)
+				pmic_ept = msm_rpc_connect(PMIC_RPC_PROG, PMIC_RPC_VER_1_1, 0);
+		}
+#if (CONFIG_MSM_AMSS_VERSION >= 1200)
+	}
+#endif
+	if (pmic_ept == NULL) {
+		r = -EIO;
+		goto done;
+	}
+#else
 	if (!pmic_ept) {
 		pmic_ept = msm_rpc_connect(PMIC_RPC_PROG, PMIC_RPC_VER, 0);
 		if (!pmic_ept) {
@@ -163,6 +195,7 @@ static int pmic_rpc(int proc, void *msg, int msglen, void *rep, int replen)
 			goto done;
 		}
 	}
+#endif
 	r = msm_rpc_call_reply(pmic_ept, proc, msg, msglen, 
 			       rep, replen, PMIC_RPC_TIMEOUT);
 	if (r >= 0) {
@@ -300,7 +333,7 @@ int pmic_secure_mpp_config_digital_input(enum mpp_which which,
 }
 EXPORT_SYMBOL(pmic_secure_mpp_config_digital_input);
 
-int pmic_rtc_start(struct rtc_time *time)
+int pmic_rtc_start(struct qct_rtc_time *time)
 {
 	return pmic_rpc_set_struct(0, 0, (uint *)time, sizeof(*time),
 				RTC_START_PROC);
@@ -314,7 +347,7 @@ int pmic_rtc_stop(void)
 EXPORT_SYMBOL(pmic_rtc_stop);
 
 int pmic_rtc_enable_alarm(enum rtc_alarm alarm,
-	struct rtc_time *time)
+	struct qct_rtc_time *time)
 {
 	return pmic_rpc_set_struct(1, alarm, (uint *)time, sizeof(*time),
 				RTC_ENABLE_ALARM_PROC);
@@ -515,6 +548,42 @@ int pmic_flash_led_set_polarity(enum flash_led_pol pol)
 }
 EXPORT_SYMBOL(pmic_flash_led_set_polarity);
 
+int  pmic_high_current_led_set_current(enum high_current_ledtype type, int milliamps)
+{
+	return pmic_rpc_set_only(type, milliamps, 0, 0, 2,
+				HIGH_CURRENT_LED_SET_CURRENT_PROC);
+}
+EXPORT_SYMBOL(pmic_high_current_led_set_current);
+
+int pmic_high_current_led_set_mode(enum high_current_ledtype type, int mode)
+{
+	return pmic_rpc_set_only(type, mode, 0, 0, 2,
+				HIGH_CURRENT_LED_SET_MODE_PROC);
+}
+EXPORT_SYMBOL(pmic_high_current_led_set_mode);
+
+int pmic_high_current_led_set_polarity(enum high_current_ledtype type, enum flash_led_pol pol)
+{
+	return pmic_rpc_set_only(type, pol, 0, 0, 2,
+				HIGH_CURRENT_LED_SET_POLARITY_PROC);
+}
+EXPORT_SYMBOL(pmic_high_current_led_set_polarity);
+
+int pmic_low_current_led_set_ext_signal(enum low_current_ledtype type,
+					enum ext_signal_selection_type signal_type)
+{
+	return pmic_rpc_set_only(type, signal_type, 0, 0, 2,
+				 LOW_CURRENT_LED_SET_EXT_SIGNAL_PROC);
+}
+EXPORT_SYMBOL(pmic_low_current_led_set_ext_signal);
+
+int pmic_low_current_led_set_current(enum low_current_ledtype type, int milliamps)
+{
+	return pmic_rpc_set_only(type, milliamps, 0, 0, 2,
+				LOW_CURRENT_LED_SET_CURRENT_PROC);
+}
+EXPORT_SYMBOL(pmic_low_current_led_set_current);
+
 int pmic_spkr_add_right_left_chan(uint enable)
 {
 	return pmic_rpc_set_only(enable, 0, 0, 0, 1,
@@ -528,3 +597,13 @@ int pmic_spkr_en_stereo(uint enable)
 }
 EXPORT_SYMBOL(pmic_spkr_en_stereo);
 
+int pmic_hsed_enable(
+	enum hsed_controller controller,
+	enum hsed_enable enable_hsed
+)
+{
+	return pmic_rpc_set_only(controller, enable_hsed, 0, 0,
+				 2,
+				 HSED_ENABLE_PROC);
+}
+EXPORT_SYMBOL(pmic_hsed_enable);

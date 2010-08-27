@@ -46,7 +46,7 @@ struct msm_hsusb_platform_data {
 	void (*usb_connected)(int);
 	/* 1 : uart, 0 : usb */
 	void (*usb_uart_switch)(int);
-
+	void (*config_usb_id_gpios)(bool enable);
 	/* val, reg pairs terminated by -1 */
 	int *phy_init_seq;
 
@@ -61,7 +61,6 @@ struct msm_hsusb_platform_data {
 	__u16 product_id;
 
 	__u16 version;
-	char *serial_number;
 	char *product_name;
 	char *manufacturer_name;
 
@@ -74,8 +73,12 @@ struct msm_hsusb_platform_data {
 	*/
 	int num_products;
 	struct msm_hsusb_product *products;
-	int usb_id_pin_gpio;
 #endif
+	char *serial_number;
+	int usb_id_pin_gpio;
+	bool enable_car_kit_detect;
+	__u8 accessory_detect;
 };
 
+int usb_get_connect_type(void);
 #endif

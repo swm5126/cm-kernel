@@ -56,7 +56,7 @@
 
 #define DELTA_SUM_TIME      40
 #define DELTA_SUM_CP        0
-
+#define OJ_RETRY		        5
 static const unsigned short keymap[] = {
 	 KEY_RIGHT,
 	 KEY_LEFT,
@@ -78,24 +78,21 @@ extern unsigned int system_rev;
 static struct proc_dir_entry *oj_proc_entry;
 static struct workqueue_struct *curcial_wq;
 static struct curcial_oj_platform_data *my_oj;
-static uint32_t click_interval = 800;
-static uint8_t  polling_delay1;/* use mdelay*/
-static uint8_t  polling_delay2;/* use msleep*/
+static uint8_t  polling_delay;/* use msleep*/
 static uint8_t  interval;
-static uint8_t  debugflag = 0;
-static uint8_t	send_count;
+static uint8_t  debugflag;
+static uint8_t	ap_code;
 static int16_t	mSumDeltaX;
 static int16_t	mSumDeltaY;
-static int8_t	fast_th;
+static int8_t	DeltaX[64];
+static int8_t	DeltaY[64];
+static int16_t	mDeltaX;
+static int16_t	mDeltaY;
 static int8_t	normal_th;
 static int8_t	xy_ratio;
-static uint8_t continue_count;
-static uint8_t continue_th;
-static uint8_t continue_max;
-static bool suspend;
 
-uint8_t  softclick;
-
+static atomic_t suspend_flag = ATOMIC_INIT(0);
+static uint16_t	index;
 
 static int __devinit curcial_oj_probe(struct platform_device *pdev);
 static int __devexit curcial_oj_remove(struct platform_device *pdev);
@@ -138,16 +135,18 @@ static void curcial_oj_polling_mode(uint8_t mode)
 	microp_i2c_write(OJ_REGISTER_OJ_POLLING, cmd, 1);
 }
 
-static void curcial_oj_irq_handler(void)
+static irqreturn_t curcial_oj_irq_handler(int irq, void *data)
 {
-	queue_work(curcial_wq, &my_oj->work);
+ 	queue_work(curcial_wq, &my_oj->work);
+	return IRQ_HANDLED;
 }
 
-static int curcial_oj_late_init(void)
+static int curcial_oj_init(void)
 {
 	uint8_t data[BURST_DATA_SIZE];
 	uint8_t id;
 	uint8_t version;
+	uint8_t i;
 
 	microp_i2c_read(MICROP_I2C_RCMD_VERSION, data, 2);
 	version = my_oj->microp_version;
@@ -178,13 +177,18 @@ static int curcial_oj_late_init(void)
 	curcial_oj_register_read(OJ_DELTA_Y);
 	curcial_oj_register_read(OJ_DELTA_X);
 
-
+	for (i = 0;i < OJ_RETRY; i++ ) {
 	id = curcial_oj_register_read(0x00);
 	if (id == OJ_DEVICE_ID) {
 		printk(KERN_INFO"OpticalJoystick Device ID: %02x\n", OJ_DEVICE_ID);
 		id = curcial_oj_register_read(0x01);
 		printk(KERN_INFO"OJ Driver: Revision : %02x\n", id);
+			break;
 	} else {
+			printk("probe OpticalJoystick Device:retry =%d\n", i);
+		}
+	}
+	if (i == OJ_RETRY) {
 		printk("Can't probe OpticalJoystick Device: %02x!\n", id);
 		return 0;
 	}
@@ -198,37 +202,18 @@ static int curcial_oj_late_init(void)
 
 	return 1;
 }
-
-static void curcial_oj_init_callback(void)
-{
-	if (!curcial_oj_late_init())
-		platform_driver_unregister(&curcial_oj_device_driver);
-}
-
-static struct microp_oj_callback oj_callback = {
-	.oj_init = curcial_oj_init_callback,
-	.oj_intr = curcial_oj_irq_handler
-};
-
-static int curcial_oj_module_init(void)
-{
-	if (!microp_register_oj_callback(&oj_callback))
-		return curcial_oj_late_init();
-
-	return 1;
-}
-static OJKeyEvt_T OJ_ProcessNavi(int Ratio, int DeltaMin)
+static OJKeyEvt_T OJ_ProcessNavi(int Ratio, int DeltaMin, int16_t SumDeltaX, int16_t SumDeltaY)
 {
 	OJKeyEvt_T	tmpKey;
 
-	if ((10*abs(mSumDeltaY) > (Ratio*abs(mSumDeltaX)))
-			&& (abs(mSumDeltaY) > DeltaMin)) {
-		if (mSumDeltaY > 0)
+	if ((10*abs(SumDeltaY) > (Ratio*abs(SumDeltaX)))
+			&& (abs(SumDeltaY) > DeltaMin)) {
+		if (SumDeltaY > 0)
 			tmpKey = OJ_KEY_UP;
 		else
 			tmpKey = OJ_KEY_DOWN;
-	} else	if (abs(mSumDeltaX) > DeltaMin) {
-		if (mSumDeltaX > 0)
+	} else	if (abs(SumDeltaX) > DeltaMin) {
+		if (SumDeltaX > 0)
 			tmpKey = OJ_KEY_RIGHT;
 		else
 			tmpKey = OJ_KEY_LEFT;
@@ -242,219 +227,150 @@ static void curcial_oj_work_func(struct work_struct *work)
 {
 	struct curcial_oj_platform_data *oj = container_of(work, struct curcial_oj_platform_data, work);
 	OJData_T  OJData;
-	OJTouchEvt_T  OJTouchEvt;
 	uint16_t i, j;
 	uint8_t data[BURST_DATA_SIZE];
-	uint32_t click_time;
-	uint8_t	count = 0;
-	OJKeyEvt_T	evtKey, lastkey;
+	uint32_t click_time = 0;
+	uint32_t delta_time = 0;
+	uint32_t entry_time = 0;
+	OJKeyEvt_T	evtKey = OJ_KEY_NONE;
 	uint8_t	x_count = 0;
 	uint8_t	y_count = 0;
 	bool out = false;
+	uint8_t pxsum;
+	uint16_t sht;
+	int16_t	x_sum;
+	int16_t	y_sum;
 
 	curcial_oj_polling_mode(OJ_POLLING_DISABLE);
-	mSumDeltaX = 0;
-	mSumDeltaY = 0;
-	lastkey = OJ_KEY_NONE;
 
+	mDeltaX = 0;
+	mDeltaY = 0;
+	oj->interval = interval;
+	entry_time = jiffies_to_msecs(jiffies);
+	x_sum = 0;
+	y_sum = 0;
 
-	if (machine_is_legend())
-		i = 0x00;
-	else 	if (machine_is_incrediblec())
-		i = 0x01; /*incrediblec */
-
-	if (oj->softclick == true && system_rev == i) {
-		for (i = 1; i < 31; i++) {
+		do {
+			memset(data, 0x00, sizeof(data));
+			out = false;
 			curcial_oj_burst_read(data);
 			OJData.squal = data[SQUAL];
+			pxsum = curcial_oj_register_read(0x09);
+			sht =	((data[SHUTTER_UPPER] << 8)|data[SHUTTER_LOWER]);
 			if (debugflag) {
-				printk(KERN_INFO"OJ:M=0x%02x Y=0x%02x X=0x%02x SQUAL=%d\n", data[0], data[1], data[2], data[SQUAL]);
+				printk(KERN_INFO"OJ1:M=0x%02x Y=0x%02x X=0x%02x SQUAL=0x%02x "
+				"SHU_U=0x%02x SHU_L=0x%02x pxsum=%d sht=%d  \n", data[MOTION], data[Y], data[X],
+				 data[SQUAL], data[SHUTTER_UPPER], data[SHUTTER_LOWER], pxsum, sht);
 			}
-
-			if (oj->swap == false) {
-				OJData.deltaX = (oj->x)*((int8_t) data[X]);
-				OJData.deltaY = (oj->y)*((int8_t) data[Y]);
-			} else {
-				OJData.deltaX = (oj->y)*((int8_t) data[Y]);
-				OJData.deltaY = (oj->x)*((int8_t) data[X]);
-			}
-
-			mSumDeltaX += -(OJData.deltaX);
-			mSumDeltaY += -(OJData.deltaY);
-			if (i % 3 == 0)
-				evtKey = OJ_ProcessNavi(15, 20);
-
-			if (evtKey != OJ_KEY_NONE) {
-				if (evtKey == OJ_KEY_LEFT || evtKey == OJ_KEY_RIGHT) {
-					if (1)
-						printk(KERN_INFO"softclick:OJ:mSumDeltaX = %d mSumDeltaY = %d \n", mSumDeltaX, mSumDeltaY);
-					x_count = abs(mSumDeltaX) / 10;
-					if (x_count >= 30)
-						x_count = 29;
-					for (j = 0; j <= oj->Xsteps[x_count]; j++) {
-						if (evtKey == OJ_KEY_LEFT) {
-							input_report_rel(oj->input_dev, REL_X, -1);
-							/*printk(KERN_INFO"OJ:KEY_LEFT\n");*/
-						} else if (evtKey == OJ_KEY_RIGHT) {
-							input_report_rel(oj->input_dev, REL_X, 1);
-							/*printk(KERN_INFO"OJ:KEY_RIGHT\n");*/
-						}
-						input_sync(oj->input_dev);
+			if (ap_code) {
+				for (i = 1; i < oj->degree; i++) {
+					if (((oj->sht_tbl[i-1] < sht) && (sht <= oj->sht_tbl[i])) && (oj->pxsum_tbl[i] < pxsum)) {
+						if (debugflag)
+							printk("OJ:A.code_condition:%d\n", i);
+						out = true;
+						break;
 					}
-					mSumDeltaX = 0;
-					mSumDeltaY = 0;
-				} else	if (evtKey == OJ_KEY_DOWN || evtKey == OJ_KEY_UP) {
-					if (1)
-						printk(KERN_INFO"softclick:OJ:mSumDeltaX = %d mSumDeltaY = %d \n", mSumDeltaX, mSumDeltaY);
-					y_count = abs(mSumDeltaY) / 10;
-					if (y_count >= 30)
-						y_count = 29;
-					for (j = 0; j <= oj->Ysteps[y_count]; j++) {
-						if (evtKey == OJ_KEY_DOWN) {
-							input_report_rel(oj->input_dev, REL_Y, 1);
-							/*printk(KERN_INFO"OJ:KEY_DOWN\n");*/
-						} else if (evtKey == OJ_KEY_UP) {
-							input_report_rel(oj->input_dev, REL_Y, -1);
-							/*printk(KERN_INFO"OJ:KEY_UP\n");*/
-						}
-						input_sync(oj->input_dev);
-					}
-					mSumDeltaX = 0;
-					mSumDeltaY = 0;
 				}
-				break;
+			if (!out)
+				goto exit;
 			}
+			oj->oj_adjust_xy(data, &mDeltaX, &mDeltaY);
 
-			OJTouchEvt = OJ_SoftClick_Event(&OJData);
 
-			if (OJTouchEvt == OJ_TOUCH_CLICK_EVT) {
-				click_time = jiffies_to_msecs(jiffies);
-				if (click_time - oj->last_click_time > click_interval)
-					oj->click	=	false;
+				DeltaX[index] = (int8_t)mDeltaX;
+				DeltaY[index] = (int8_t)mDeltaY;
+				/*printk(KERN_INFO"index=%d: DeltaX[]  = %d DeltaY[] = %d \n",index, DeltaX[index] , DeltaY[index]);*/
+				if (++index == 64)
+					index = 0;
 
-				if (oj->click) {
-					if (click_time - oj->last_click_time < click_interval) {
-						OJData.key = BTN_MOUSE;
-						oj->click = false;
-					}
-				} else {
-					oj->click = true;
-					printk(KERN_INFO"%s:CLICK\n", __func__);
-				}
-				oj->last_click_time = click_time;
-
-			}
-
-			if (data[SQUAL] < 30) {
-				if (count++ == 3)
-				break;
-			}
-			if (polling_delay1)
-				mdelay(polling_delay1);
-			if (polling_delay2)
-				msleep(polling_delay2);
-		}
-
-		if (OJData.key == BTN_MOUSE) {
-			input_report_key(oj->input_dev, OJData.key, 1);
-			input_report_key(oj->input_dev, OJData.key, 0);
-			printk(KERN_INFO"OJ: BTN_MOUSE\n");
-		}
-	} else {
-			curcial_oj_burst_read(data);
-			OJData.squal = data[SQUAL];
-			if (debugflag) {
-				printk(KERN_INFO"OJ:M=0x%02x Y=0x%02x X=0x%02x SQUAL=%d\n", data[0], data[1], data[2], data[SQUAL]);
-			}
-
-			oj->oj_adjust_xy(data, &mSumDeltaX, &mSumDeltaY);
+			x_sum = x_sum + mDeltaX;
+			y_sum = y_sum + mDeltaY;
+			mSumDeltaX = mSumDeltaX + mDeltaX;
+			mSumDeltaY = mSumDeltaY + mDeltaY;
 			if (debugflag)
 				printk(KERN_INFO"check:OJ:mSumDeltaX = %d mSumDeltaY = %d \n", mSumDeltaX, mSumDeltaY);
-			click_time = jiffies_to_msecs(jiffies);
 
-			if (continue_count > continue_th && (click_time - oj->last_click_time < interval))
-				evtKey = OJ_ProcessNavi(xy_ratio, fast_th);
-			else
-				evtKey = OJ_ProcessNavi(xy_ratio, normal_th);
+			evtKey = OJ_ProcessNavi(xy_ratio, normal_th, x_sum, y_sum);
 
-			if (evtKey == OJ_KEY_LEFT || evtKey == OJ_KEY_RIGHT) {
-				if (click_time - oj->last_click_time < interval) {
-					continue_count++;
-				} else
-					continue_count = 0;
+			if (evtKey != OJ_KEY_NONE) {
+				click_time = jiffies_to_msecs(jiffies);
+				if (debugflag)
+					printk(KERN_INFO"click_time=%x last_click_time=%x, %x\n", click_time, oj->last_click_time, click_time-oj->last_click_time);
 
-			if (continue_max != 0 && continue_count > continue_th+continue_max)
-					continue_count = 0;
-
-			if (debugflag)
-				printk(KERN_INFO"check:OJ:continue_count = %d \n", continue_count);
-
-				x_count = oj->Xsteps[abs(mSumDeltaX) / 50];
-
-				if (continue_count > continue_th)
-					x_count = send_count;
-
-				for (j = 0; j < x_count; j++) {
-					if (evtKey == OJ_KEY_LEFT) {
-						input_report_rel(oj->input_dev, REL_X, -1);
-						if (debugflag)
-							printk(KERN_INFO"OJ:KEY_LEFT\n");
-					} else if (evtKey == OJ_KEY_RIGHT) {
-						input_report_rel(oj->input_dev, REL_X, 1);
-						if (debugflag)
-							printk(KERN_INFO"OJ:KEY_RIGHT\n");
-					}
-
+			if (oj->last_click_time == 0) {
+				oj->last_click_time = entry_time - oj->interval;
+				oj->key = evtKey;
 				}
-				oj->last_click_time  = jiffies_to_msecs(jiffies);
-				input_sync(oj->input_dev);
-				mSumDeltaX = 0;
-				mSumDeltaY = 0;
-			} else	if (evtKey == OJ_KEY_DOWN || evtKey == OJ_KEY_UP) {
-				if (click_time - oj->last_click_time < interval) {
-					continue_count++;
-				} else
-					continue_count = 0;
 
-			if (continue_max != 0 && continue_count > continue_th+continue_max)
-					continue_count = 0;
+			delta_time = 	click_time - entry_time;
 
-			if (debugflag)
-				printk(KERN_INFO"check:OJ:continue_count = %d \n", continue_count);
+			/*printk(KERN_INFO"x_sum=%d y_sum=%d, delta time=%dms\n", x_sum, y_sum, delta_time);*/
 
-				y_count = oj->Ysteps[abs(mSumDeltaY) / 50];
+				if (click_time - oj->last_click_time < oj->interval) {
+					evtKey = OJ_KEY_NONE;
 
-				if (continue_count > continue_th)
-					y_count = send_count;
-
-				for (j = 0; j < y_count; j++) {
-					if (evtKey == OJ_KEY_DOWN) {
-						input_report_rel(oj->input_dev, REL_Y, 1);
-						if (debugflag)
-							printk(KERN_INFO"OJ:KEY_DOWN\n");
-					} else if (evtKey == OJ_KEY_UP) {
-						input_report_rel(oj->input_dev, REL_Y, -1);
-						if (debugflag)
-							printk(KERN_INFO"OJ:KEY_UP\n");
-					}
-
+				if (debugflag)
+						printk(KERN_INFO"interval blocking < %d\n", oj->interval);
+				}else if (click_time - oj->last_click_time < 80 && evtKey != oj->key) {
+					evtKey = OJ_KEY_NONE;
+					printk(KERN_INFO"sudden key ignore \n");
 				}
-				oj->last_click_time  = jiffies_to_msecs(jiffies);
-				input_sync(oj->input_dev);
-				mSumDeltaX = 0;
-				mSumDeltaY = 0;
 			}
-		}
-		if (polling_delay1)
-			mdelay(polling_delay1);
-		if (polling_delay2)
-			msleep(polling_delay2);
+
+			x_count = oj->Xsteps[abs(x_sum) / normal_th];
+			y_count = oj->Ysteps[abs(y_sum) / normal_th];
+			if (evtKey == OJ_KEY_LEFT) {
+				for (j = 0; j < x_count; j++) {
+					input_report_rel(oj->input_dev, REL_X, -1);
+					input_sync(oj->input_dev);
+				}
+				if (debugflag)
+					printk(KERN_INFO"OJ:KEY_LEFT:%d\n", x_count);
+
+			} else if (evtKey == OJ_KEY_RIGHT) {
+				for (j = 0; j < x_count; j++) {
+					input_report_rel(oj->input_dev, REL_X, 1);
+					input_sync(oj->input_dev);
+				}
+				if (debugflag)
+					printk(KERN_INFO"OJ:KEY_RIGHT:%d\n", x_count);
+
+			} else if (evtKey == OJ_KEY_DOWN) {
+				for (j = 0; j < y_count; j++) {
+					input_report_rel(oj->input_dev, REL_Y, 1);
+					input_sync(oj->input_dev);
+				}
+				if (debugflag)
+					printk(KERN_INFO"OJ:KEY_DOWN:%d\n", y_count);
+
+			} else if (evtKey == OJ_KEY_UP) {
+				for (j = 0; j < y_count; j++) {
+					input_report_rel(oj->input_dev, REL_Y, -1);
+					input_sync(oj->input_dev);
+				}
+				if (debugflag)
+					printk(KERN_INFO"OJ:KEY_UP:%d\n", y_count);
+			}
+
+			if (evtKey != OJ_KEY_NONE) {
+				oj->key = evtKey;
+				oj->last_click_time = click_time;
+				x_sum = 0;
+				y_sum = 0;
+				/*goto exit;*/
+			}
+		mDeltaX = 0;
+		mDeltaY = 0;
+		if (polling_delay)
+			msleep(polling_delay);/*hr_msleep(polling_delay);*/
+			} while ((data[0] & 0x80) && (!atomic_read(&suspend_flag)));
 
 
-	gTouchEvt = OJ_TOUCH_NONE_EVT;
+exit:
+
 	if (debugflag)
 		printk(KERN_INFO"%s:-\n", __func__);
-	if (suspend == false)
+	if (!atomic_read(&suspend_flag))
 		curcial_oj_polling_mode(OJ_POLLING_ENABLE);
 	else
 		curcial_oj_polling_mode(OJ_POLLING_DISABLE);
@@ -464,23 +380,24 @@ static void curcial_oj_work_func(struct work_struct *work)
 static ssize_t oj_show(struct device *dev,
 					struct device_attribute *attr, char *buf)
 {
-	uint8_t i,j = 20;
-	while(j--) {
-	i = curcial_oj_register_read(0x05);
-	printk("SQUAL = 0x%x\n",i);
-	i = curcial_oj_register_read(0x00);
-	printk("ID = 0x%x\n",i);
-	mdelay(10);
-	}
 
 	return sprintf(buf,
-				"interval=%d fast_th=%d normal_th=%d continue_th=%d send_count=%d system_rev=%d"
-				" debugflag=%d polling_delay1=%d xy_ratio=%d polling_delay2=%d\n",
-				 interval, fast_th, normal_th, continue_th, send_count, system_rev, debugflag,
-				  polling_delay1, xy_ratio, polling_delay2);
+				"interval=%d normal_th=%d system_rev=%d"
+				" debugflag=%d polling_delay=%d xy_ratio=%d  ap_code=%d",
+				 interval, normal_th, system_rev, debugflag,
+				  polling_delay, xy_ratio, ap_code);
 
 }
 
+static ssize_t oj_ap_code_store(struct device *dev,
+					 struct device_attribute *attr,
+					 const char *buf, size_t count)
+{
+
+	ap_code = simple_strtoull(buf, NULL, 10);
+
+	return count;
+}
 static ssize_t oj_interval_store(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf, size_t count)
@@ -488,27 +405,9 @@ static ssize_t oj_interval_store(struct device *dev,
 
 	interval = simple_strtoull(buf, NULL, 10);
 
-		printk(KERN_INFO
-				"interval=%d fast_th=%d normal_th=%d continue_th=%d send_count=%d system_rev=%d"
-				" debugflag=%d polling_delay1=%d xy_ratio=%d polling_delay2=%d\n",
-				 interval, fast_th, normal_th, continue_th, send_count, system_rev, debugflag,
-				  polling_delay1, xy_ratio, polling_delay2);
 	return count;
 }
-static ssize_t oj_fast_th_store(struct device *dev,
-					 struct device_attribute *attr,
-					 const char *buf, size_t count)
-{
 
-	fast_th = simple_strtoull(buf, NULL, 10);
-
-		printk(KERN_INFO
-				"interval=%d fast_th=%d normal_th=%d continue_th=%d send_count=%d system_rev=%d"
-				" debugflag=%d polling_delay1=%d xy_ratio=%d polling_delay2=%d\n",
-				 interval, fast_th, normal_th, continue_th, send_count, system_rev, debugflag,
-				  polling_delay1, xy_ratio, polling_delay2);
-	return count;
-}
 static ssize_t oj_normal_th_store(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf, size_t count)
@@ -516,41 +415,18 @@ static ssize_t oj_normal_th_store(struct device *dev,
 
 	normal_th = simple_strtoull(buf, NULL, 10);
 
-		printk(KERN_INFO
-				"interval=%d fast_th=%d normal_th=%d continue_th=%d send_count=%d system_rev=%d"
-				" debugflag=%d polling_delay1=%d xy_ratio=%d polling_delay2=%d\n",
-				 interval, fast_th, normal_th, continue_th, send_count, system_rev, debugflag,
-				  polling_delay1, xy_ratio, polling_delay2);
 	return count;
 }
-static ssize_t oj_polling_delay1_store(struct device *dev,
+static ssize_t oj_polling_delay_store(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf, size_t count)
 {
 
-	polling_delay1 = simple_strtoull(buf, NULL, 10);
+	polling_delay = simple_strtoull(buf, NULL, 10);
 
-		printk(KERN_INFO
-				"interval=%d fast_th=%d normal_th=%d continue_th=%d send_count=%d system_rev=%d"
-				" debugflag=%d polling_delay1=%d xy_ratio=%d polling_delay2=%d\n",
-				 interval, fast_th, normal_th, continue_th, send_count, system_rev, debugflag,
-				  polling_delay1, xy_ratio, polling_delay2);
 	return count;
 }
-static ssize_t oj_polling_delay2_store(struct device *dev,
-					 struct device_attribute *attr,
-					 const char *buf, size_t count)
-{
 
-	polling_delay2 = simple_strtoull(buf, NULL, 10);
-
-		printk(KERN_INFO
-				"interval=%d fast_th=%d normal_th=%d continue_th=%d send_count=%d system_rev=%d"
-				" debugflag=%d polling_delay1=%d xy_ratio=%d polling_delay2=%d\n",
-				 interval, fast_th, normal_th, continue_th, send_count, system_rev, debugflag,
-				  polling_delay1, xy_ratio, polling_delay2);
-	return count;
-}
 static ssize_t oj_xy_ratio_store(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf, size_t count)
@@ -558,11 +434,6 @@ static ssize_t oj_xy_ratio_store(struct device *dev,
 
 	xy_ratio = simple_strtoull(buf, NULL, 10);
 
-		printk(KERN_INFO
-				"interval=%d fast_th=%d normal_th=%d continue_th=%d send_count=%d system_rev=%d"
-				" debugflag=%d polling_delay1=%d xy_ratio=%d polling_delay2=%d\n",
-				 interval, fast_th, normal_th, continue_th, send_count, system_rev, debugflag,
-				  polling_delay1, xy_ratio, polling_delay2);
 	return count;
 }
 static ssize_t oj_debugflag_store(struct device *dev,
@@ -572,46 +443,9 @@ static ssize_t oj_debugflag_store(struct device *dev,
 
 	debugflag = simple_strtoull(buf, NULL, 10);
 
-		printk(KERN_INFO
-				"interval=%d fast_th=%d normal_th=%d continue_th=%d send_count=%d system_rev=%d"
-				" debugflag=%d polling_delay1=%d xy_ratio=%d polling_delay2=%d\n",
-				 interval, fast_th, normal_th, continue_th, send_count, system_rev, debugflag,
-				  polling_delay1, xy_ratio, polling_delay2);
 	return count;
 }
 
-static ssize_t oj_continue_th_store(struct device *dev,
-					 struct device_attribute *attr,
-					 const char *buf, size_t count)
-{
-
-	continue_th = simple_strtoull(buf, NULL, 10);
-
-
-		printk(KERN_INFO
-				"interval=%d fast_th=%d normal_th=%d continue_th=%d send_count=%d system_rev=%d"
-				" debugflag=%d polling_delay1=%d xy_ratio=%d polling_delay2=%d\n",
-				 interval, fast_th, normal_th, continue_th, send_count, system_rev, debugflag,
-				  polling_delay1, xy_ratio, polling_delay2);
-
-	return count;
-}
-static ssize_t oj_send_count_store(struct device *dev,
-					 struct device_attribute *attr,
-					 const char *buf, size_t count)
-{
-
-	send_count = simple_strtoull(buf, NULL, 10);
-
-
-		printk(KERN_INFO
-				"interval=%d fast_th=%d normal_th=%d continue_th=%d send_count=%d system_rev=%d"
-				" debugflag=%d polling_delay1=%d xy_ratio=%d polling_delay2=%d\n",
-				 interval, fast_th, normal_th, continue_th, send_count, system_rev, debugflag,
-				  polling_delay1, xy_ratio, polling_delay2);
-
-	return count;
-}
 
 static ssize_t oj_xtable_store(struct device *dev,
 					 struct device_attribute *attr,
@@ -620,7 +454,7 @@ static ssize_t oj_xtable_store(struct device *dev,
 
 	char *buffer,*endptr;
 	int i;
-	buffer = buf;
+	buffer = (char *)buf;
 
 	i= simple_strtoull(buffer, &endptr, 10);
 	buffer = endptr+1;
@@ -636,7 +470,7 @@ static ssize_t oj_ytable_store(struct device *dev,
 {
 	char *buffer,*endptr;
 	int i;
-	buffer = buf;;
+	buffer = (char *)buf;;
 
 
 	i= simple_strtoull(buffer, &endptr, 10);
@@ -671,15 +505,75 @@ static ssize_t oj_ytable_show(struct device *dev,
 	return sprintf(buf,"Y_table:%s\n",log);
 
 }
+static ssize_t oj_deltax_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	char log[512];
+	uint8_t i,p;
+
+	for (i = 0, p = 0; i < 64 ; i++)	{
+		if (i == 63)
+			p += sprintf(log+p, "%d",  DeltaX[i]);
+		else
+			p += sprintf(log+p, "%d,",  DeltaX[i]);
+	}
+
+	return sprintf(buf,"%s\n", log);
+
+}
+static ssize_t oj_deltay_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	char log[512];
+	uint8_t i,p;
+
+	for (i = 0, p = 0; i < 64 ; i++)	{
+		if (i == 63)
+			p += sprintf(log+p, "%d",  DeltaY[i]);
+		else
+			p += sprintf(log+p, "%d,",  DeltaY[i]);
+	}
+
+	return sprintf(buf,"%s\n", log);
+
+}
+static ssize_t oj_SumDeltaX_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+
+	return sprintf(buf,"%d\n", mSumDeltaX);
+
+}
+static ssize_t oj_SumDeltaY_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+
+	return sprintf(buf,"%d\n", mSumDeltaY);
+
+}
+static ssize_t oj_reset_store(struct device *dev,
+					 struct device_attribute *attr,
+					 const char *buf, size_t count)
+{
+		index = 0;
+		mSumDeltaX = 0;
+		mSumDeltaY = 0;
+		memset(DeltaX, 0x00, sizeof(DeltaX));
+		memset(DeltaY, 0x00, sizeof(DeltaY));
+
+	return count;
+}
+static DEVICE_ATTR(reset, 0666, oj_show, oj_reset_store);
+static DEVICE_ATTR(deltax, 0444, oj_deltax_show, NULL);
+static DEVICE_ATTR(deltay, 0444, oj_deltay_show, NULL);
+static DEVICE_ATTR(SumDeltaX, 0444, oj_SumDeltaX_show, NULL);
+static DEVICE_ATTR(SumDeltaY, 0444, oj_SumDeltaY_show, NULL);
+static DEVICE_ATTR(ap_code, 0644, oj_show, oj_ap_code_store);
 static DEVICE_ATTR(interval, 0644, oj_show, oj_interval_store);
-static DEVICE_ATTR(fast_th, 0644, oj_show, oj_fast_th_store);
 static DEVICE_ATTR(normal_th, 0644, oj_show, oj_normal_th_store);
-static DEVICE_ATTR(polling_delay1, 0644, oj_show, oj_polling_delay1_store);
-static DEVICE_ATTR(polling_delay2, 0644, oj_show, oj_polling_delay2_store);
+static DEVICE_ATTR(polling_delay, 0644, oj_show, oj_polling_delay_store);
 static DEVICE_ATTR(xy_ratio, 0644, oj_show, oj_xy_ratio_store);
 static DEVICE_ATTR(debugflag, 0644, oj_show, oj_debugflag_store);
-static DEVICE_ATTR(send_count, 0644, oj_show, oj_send_count_store);
-static DEVICE_ATTR(continue_th, 0644, oj_show, oj_continue_th_store);
 static DEVICE_ATTR(xtable, 0644, oj_xtable_show, oj_xtable_store);
 static DEVICE_ATTR(ytable, 0644, oj_ytable_show, oj_ytable_store);
 
@@ -687,7 +581,7 @@ static DEVICE_ATTR(ytable, 0644, oj_ytable_show, oj_ytable_store);
 static void curcial_oj_early_suspend(struct early_suspend *h)
 {
 	struct curcial_oj_platform_data *oj;
-	suspend = true;
+	atomic_set(&suspend_flag, 1);
 	oj = container_of(h, struct curcial_oj_platform_data, early_suspend);
 	printk(KERN_ERR"%s: enter\n", __func__);
 	oj->oj_shutdown(1);
@@ -702,10 +596,11 @@ static void curcial_oj_early_suspend(struct early_suspend *h)
 static void curcial_oj_late_resume(struct early_suspend *h)
 {
 	struct curcial_oj_platform_data	*oj;
-	suspend = false;
+	atomic_set(&suspend_flag, 0);
 	oj = container_of(h, struct curcial_oj_platform_data, early_suspend);
 	printk(KERN_ERR"%s: enter\n", __func__);
-	curcial_oj_module_init();
+	if (!curcial_oj_init())
+		microp_spi_vote_enable(SPI_OJ, 0);
 }
 #endif
 
@@ -715,12 +610,9 @@ static int __devinit curcial_oj_probe(struct platform_device *pdev)
 	int err;
 	int i;
 
+	err = -ENOMEM;
 	my_oj = oj;
-	if (!curcial_oj_module_init()) {
-		printk(KERN_ERR "Unable to init OJ module\n");
-		err = -EINVAL;
-		goto fail;
-	}
+
 
 	INIT_WORK(&oj->work, curcial_oj_work_func);
 
@@ -729,7 +621,6 @@ static int __devinit curcial_oj_probe(struct platform_device *pdev)
 		err = -ENOMEM;
 		goto fail;
 	}
-
 
 	oj->input_dev = input_allocate_device();
 	if (!oj->input_dev) {
@@ -755,43 +646,53 @@ static int __devinit curcial_oj_probe(struct platform_device *pdev)
 		goto fail;
 	}
 
+	if (!curcial_oj_init())
+		goto fail;
+
+	err = request_irq(my_oj->irq, curcial_oj_irq_handler,
+			  IRQF_TRIGGER_NONE, CURCIAL_OJ_NAME, oj);
+	if (err < 0) {
+		err = -ENOMEM;
+		printk(KERN_ERR "request_irq failed\n");
+		goto fail;
+	}
+
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	oj->early_suspend.suspend = curcial_oj_early_suspend;
 	oj->early_suspend.resume = curcial_oj_late_resume;
 /*	oj->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB + 1;*/
 	register_early_suspend(&oj->early_suspend);
 #endif
-
+	err = 	device_create_file(&(pdev->dev), &dev_attr_reset);
+	err = 	device_create_file(&(pdev->dev), &dev_attr_deltax);
+	err = 	device_create_file(&(pdev->dev), &dev_attr_deltay);
+	err = 	device_create_file(&(pdev->dev), &dev_attr_SumDeltaX);
+	err = 	device_create_file(&(pdev->dev), &dev_attr_SumDeltaY);
+	err = 	device_create_file(&(pdev->dev), &dev_attr_ap_code);
 	err = 	device_create_file(&(pdev->dev), &dev_attr_interval);
-	err = 	device_create_file(&(pdev->dev), &dev_attr_fast_th);
 	err = 	device_create_file(&(pdev->dev), &dev_attr_normal_th);
-	err = 	device_create_file(&(pdev->dev), &dev_attr_continue_th);
-	err = 	device_create_file(&(pdev->dev), &dev_attr_send_count);
-	err = 	device_create_file(&(pdev->dev), &dev_attr_polling_delay1);
-	err = 	device_create_file(&(pdev->dev), &dev_attr_polling_delay2);
+	err = 	device_create_file(&(pdev->dev), &dev_attr_polling_delay);
 	err = 	device_create_file(&(pdev->dev), &dev_attr_xy_ratio);
 	err = 	device_create_file(&(pdev->dev), &dev_attr_debugflag);
 	err = 	device_create_file(&(pdev->dev), &dev_attr_xtable);
 	err = 	device_create_file(&(pdev->dev), &dev_attr_ytable);
 
-	fast_th = my_oj->fast_th;
 	normal_th = my_oj->normal_th;
-	continue_th = my_oj->continue_th;
-	continue_max = my_oj->continue_max;
-	send_count = my_oj->send_count;
 	xy_ratio = my_oj->xy_ratio;
 	interval = my_oj->interval;
-	polling_delay1 = my_oj->mdelay_time;
-	polling_delay2 = my_oj->msleep_time;
+	polling_delay = my_oj->mdelay_time;
+	debugflag = my_oj->debugflag;
+	ap_code = my_oj->ap_code;
 
 	printk(KERN_INFO "OJ: driver loaded\n");
 	return 0;
 
 fail:
+	microp_spi_vote_enable(SPI_OJ, 0);
+
 	if (oj->share_power == false) {
 		oj->oj_poweron(OJ_POWEROFF);
 	}
-	microp_spi_vote_enable(SPI_OJ, 0);
 
 	if (oj->input_dev) {
 		input_free_device(oj->input_dev);
@@ -830,34 +731,35 @@ static int __devexit curcial_oj_remove(struct platform_device *pdev)
 	if (oj_proc_entry)
 		remove_proc_entry("oj", NULL);
 
-
+	device_remove_file(&(pdev->dev), &dev_attr_reset);
+	device_remove_file(&(pdev->dev), &dev_attr_deltax);
+	device_remove_file(&(pdev->dev), &dev_attr_deltay);
+	device_remove_file(&(pdev->dev), &dev_attr_SumDeltaX);
+	device_remove_file(&(pdev->dev), &dev_attr_SumDeltaY);
+	device_remove_file(&(pdev->dev), &dev_attr_ap_code);
 	device_remove_file(&(pdev->dev), &dev_attr_interval);
-	device_remove_file(&(pdev->dev), &dev_attr_fast_th);
 	device_remove_file(&(pdev->dev), &dev_attr_normal_th);
-	device_remove_file(&(pdev->dev), &dev_attr_polling_delay1);
-	device_remove_file(&(pdev->dev), &dev_attr_polling_delay2);
+	device_remove_file(&(pdev->dev), &dev_attr_polling_delay);
 	device_remove_file(&(pdev->dev), &dev_attr_xy_ratio);
 	device_remove_file(&(pdev->dev), &dev_attr_debugflag);
-	device_remove_file(&(pdev->dev), &dev_attr_send_count);
-	device_remove_file(&(pdev->dev), &dev_attr_continue_th);
 	device_remove_file(&(pdev->dev), &dev_attr_xtable);
 	device_remove_file(&(pdev->dev), &dev_attr_ytable);
 	printk(KERN_INFO "OJ: driver unloaded\n");
 	return 0;
 }
 
-static int __init curcial_oj_init(void)
+static int __init curcial_oj_module_init(void)
 {
 	return platform_driver_register(&curcial_oj_device_driver);
 }
 
-static void __exit curcial_oj_exit(void)
+static void __exit curcial_oj_module_exit(void)
 {
 	platform_driver_unregister(&curcial_oj_device_driver);
 }
 
-module_init(curcial_oj_init);
-module_exit(curcial_oj_exit);
+module_init(curcial_oj_module_init);
+module_exit(curcial_oj_module_exit);
 
 void curcial_oj_send_key(unsigned int code, int value)
 {

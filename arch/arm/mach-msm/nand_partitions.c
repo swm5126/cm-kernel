@@ -46,12 +46,31 @@ struct msm_ptbl_entry
 	__u32 flags;
 };
 
-#define MSM_MAX_PARTITIONS 8
+#define MSM_MAX_PARTITIONS 11
 
 static struct mtd_partition msm_nand_partitions[MSM_MAX_PARTITIONS];
 static char msm_nand_names[MSM_MAX_PARTITIONS * 16];
 
 extern struct flash_platform_data msm_nand_data;
+
+int emmc_partition_read_proc(char *page, char **start, off_t off,
+			   int count, int *eof, void *data)
+{
+	struct mtd_partition *ptn = msm_nand_partitions;
+	char *p = page;
+	int i;
+	uint64_t offset;
+	uint64_t size;
+
+	p += sprintf(p, "dev:        size     erasesize name\n");
+	for (i = 0; i < MSM_MAX_PARTITIONS && ptn->name; i++, ptn++) {
+		offset = ptn->offset;
+		size = ptn->size;
+		p += sprintf(p, "mmcblk0p%llu: %08llx %08x \"%s\"\n", offset, size * 512, 512, ptn->name);
+	}
+
+	return p - page;
+}
 
 static int __init parse_tag_msm_partition(const struct tag *tag)
 {
@@ -75,15 +94,15 @@ static int __init parse_tag_msm_partition(const struct tag *tag)
 			have_kpanic = 1;
 
 		ptn->name = name;
-		ptn->offset = entry->offset * 64 * 2048;
-		ptn->size = entry->size * 64 * 2048;
+		ptn->offset = entry->offset;
+		ptn->size = entry->size;
 
 		name += 16;
 		entry++;
 		ptn++;
 	}
 
-#if CONFIG_VIRTUAL_KPANIC_PARTITION
+#ifdef CONFIG_VIRTUAL_KPANIC_PARTITION
 	if (!have_kpanic) {
 		int i;
 		uint64_t kpanic_off = 0;
@@ -117,8 +136,8 @@ static int __init parse_tag_msm_partition(const struct tag *tag)
 
 		count++;
 	}
-#endif /* CONFIG_VIRTUAL_KPANIC_SRC */
 out:
+#endif /* CONFIG_VIRTUAL_KPANIC_SRC */
 	msm_nand_data.nr_parts = count;
 	msm_nand_data.parts = msm_nand_partitions;
 

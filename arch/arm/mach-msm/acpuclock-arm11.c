@@ -33,7 +33,7 @@
 
 #include "proc_comm.h"
 #include "acpuclock.h"
-#include <asm/mach-types.h>
+
 
 #define A11S_CLK_CNTL_ADDR (MSM_CSR_BASE + 0x100)
 #define A11S_CLK_SEL_ADDR (MSM_CSR_BASE + 0x104)
@@ -49,12 +49,8 @@
 #define ACPU_PLL_2	2
 #define ACPU_PLL_3	3
 
-enum {
-	PERF_SWITCH_DEBUG = 1U << 0,
-	PERF_SWITCH_STEP_DEBUG = 1U << 1,
-	PERF_SWITCH_PLL_DEBUG = 1U << 2,
-	PERF_SWITCH_VDD_DEBUG = 1U << 3,
-};
+#define PERF_SWITCH_DEBUG 0
+#define PERF_SWITCH_STEP_DEBUG 0
 
 struct clock_state
 {
@@ -78,9 +74,9 @@ enum {
 	VDD_1 = 1,
 	VDD_2 = 2,
 	VDD_3 = 3,
-	VDD_4 = 4,
-	VDD_5 = 5,
-	VDD_6 = 6,
+	VDD_4 = 3,
+	VDD_5 = 3,
+	VDD_6 = 3,
 	VDD_7 = 7,
 	VDD_END
 };
@@ -93,7 +89,7 @@ struct clkctl_acpu_speed {
 	unsigned int	ahbclk_khz;
 	unsigned int	ahbclk_div;
 	int		vdd;
-	unsigned int	axiclk_khz;
+	unsigned int 	axiclk_khz;
 	unsigned long	lpj; /* loops_per_jiffy */
 /* Index in acpu_freq_tbl[] for steppings. */
 	short		down;
@@ -107,42 +103,26 @@ struct clkctl_acpu_speed {
  * Table stepping up/down is optimized for 256mhz jumps while staying on the
  * same PLL.
  */
-static struct clkctl_acpu_speed *acpu_freq_tbl;
-/* PLL0(mpll): 960MHz, PLL1(gpll):245.76MHz, PLL2(bpll): 1200MHz */
-static struct clkctl_acpu_speed msm7227_tbl[] = {
-	{  19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, VDD_0, 30720, 0, -1, 4 },
-	{  120000, ACPU_PLL_0, 4, 7,  60000, 1, VDD_3, 61440, 0, -1, 5 },
-	{  122880, ACPU_PLL_1, 1, 1,  61440, 1, VDD_3, 61440, 0, -1, 4 },
-	{  200000, ACPU_PLL_2, 2, 5,  66667, 2, VDD_4, 61440, 0, -1, 6 },
-	{  245760, ACPU_PLL_1, 1, 0, 122880, 1, VDD_4, 122880, 0, -1, 7 },
-	{  320000, ACPU_PLL_0, 4, 2, 160000, 1, VDD_5, 160000, 0, 1, 7 },
-	{  400000, ACPU_PLL_2, 2, 2, 133333, 2, VDD_5, 160000, 0, 3, -1 },
-	{  480000, ACPU_PLL_0, 4, 1, 160000, 2, VDD_6, 160000, 0, 5, -1 },
-	{  600000, ACPU_PLL_2, 2, 1, 200000, 2, VDD_7, 200000, 0, 6, -1 },
-	{  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-};
-
-/* 7200a turbo mode, PLL0(mpll):245.76, PLL1(gpll):960, PLL2(bpll0):1056 */
-static struct clkctl_acpu_speed  msm72xx_tbl[] = {
-#if defined(CONFIG_TURBO_MODE)
-	{ 19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, VDD_0, 30720, 0, 0, 4 },
-	{ 122880, ACPU_PLL_0, 4, 1, 61440, 1, VDD_3, 61440, 0, 0, 4 },
-#if 1 /* QCT fixup */
-	{ 160000, ACPU_PLL_1, 1, 5, 53333, 2, VDD_3, 61440, 0, 0, 6 },
-#else /* Google */
-	{ 160000, ACPU_PLL_1, 1, 5, 64000, 1, VDD_3, 61440, 0, 0, 6 },
-#endif
-	{ 176000, ACPU_PLL_2, 2, 5, 88000, 1, VDD_3, 61440, 0, 0, 5 },
-	{ 245760, ACPU_PLL_0, 4, 0, 81920, 2, VDD_4, 61440, 0, 0, 5 },
-	{ 352000, ACPU_PLL_2, 2, 2, 88000, 3, VDD_5, 128000, 0, 3, 7 },
-#if 1 /* QCT fixup */
-	{ 480000, ACPU_PLL_1, 1, 1, 120000, 3, VDD_6, 120000, 0, 2, -1 },
-#else /* Google */
-	{ 480000, ACPU_PLL_1, 1, 1, 128000, 2, VDD_6, 160000, 0, 2, -1 },
-#endif
-	{ 528000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 160000, 0, 5, -1 },
+#if (0)
+static struct clkctl_acpu_speed  acpu_freq_tbl[] = {
+	{ 19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, VDD_0, 30720, 0, 0, 8 },
+	{ 61440, ACPU_PLL_0,  4, 3, 61440,  0, VDD_0, 30720,  0, 0, 8 },
+	{ 81920, ACPU_PLL_0,  4, 2, 40960,  1, VDD_0, 61440,  0, 0, 8 },
+	{ 96000, ACPU_PLL_1,  1, 7, 48000,  1, VDD_0, 61440,  0, 0, 9 },
+	{ 122880, ACPU_PLL_0, 4, 1, 61440,  1, VDD_3, 61440,  0, 0, 8 },
+	{ 128000, ACPU_PLL_1, 1, 5, 64000,  1, VDD_3, 61440,  0, 0, 12 },
+	{ 176000, ACPU_PLL_2, 2, 5, 88000,  1, VDD_3, 61440,  0, 0, 11 },
+	{ 192000, ACPU_PLL_1, 1, 3, 64000,  2, VDD_3, 61440,  0, 0, 12 },
+	{ 245760, ACPU_PLL_0, 4, 0, 81920,  2, VDD_4, 61440,  0, 0, 12 },
+	{ 256000, ACPU_PLL_1, 1, 2, 128000, 2, VDD_5, 128000, 0, 0, 12 },
+	{ 264000, ACPU_PLL_2, 2, 3, 88000,  2, VDD_5, 128000, 0, 6, 13 },
+	{ 352000, ACPU_PLL_2, 2, 2, 88000,  3, VDD_5, 128000, 0, 6, 13 },
+	{ 384000, ACPU_PLL_1, 1, 1, 128000, 2, VDD_6, 128000, 0, 5, -1 },
+	{ 528000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 128000, 0, 11, -1 },
 	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-#else
+};
+#else /* Table of freq we currently use. */
+static struct clkctl_acpu_speed  acpu_freq_tbl[] = {
 	{ 19200, ACPU_PLL_TCXO, 0, 0, 19200, 0, VDD_0, 30720, 0, 0, 4 },
 	{ 122880, ACPU_PLL_0, 4, 1, 61440, 1, VDD_3, 61440, 0, 0, 4 },
 	{ 128000, ACPU_PLL_1, 1, 5, 64000, 1, VDD_3, 61440, 0, 0, 6 },
@@ -152,97 +132,40 @@ static struct clkctl_acpu_speed  msm72xx_tbl[] = {
 	{ 384000, ACPU_PLL_1, 1, 1, 128000, 2, VDD_6, 128000, 0, 2, -1 },
 	{ 528000, ACPU_PLL_2, 2, 1, 132000, 3, VDD_7, 128000, 0, 5, -1 },
 	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-#endif
-};
-
-#ifdef CONFIG_CPU_FREQ
-static struct cpufreq_frequency_table *freq_table;
-static struct cpufreq_frequency_table msm7227_freq_table[] = {
-	{ 0, 19200 },
-	{ 1, 122880 },
-	{ 2, 128000 },
-	{ 3, 245760 },
-	{ 4, 480000 },
-	{ 5, 600000 },
-	{ 6, CPUFREQ_TABLE_END },
-};
-
-static struct cpufreq_frequency_table msm72xx_freq_table[] = {
-#if defined(CONFIG_TURBO_MODE)
-	{ 0, 19200 },
-	{ 1, 122880 },
-	{ 2, 160000 },
-	{ 3, 245760 },
-	{ 4, 480000 },
-	{ 5, 528000 },
-	{ 6, CPUFREQ_TABLE_END },
-#else
-	{ 0, 19200 },
-	{ 1, 122880 },
-	{ 2, 128000 },
-	{ 3, 245760 },
-	{ 4, 384000 },
-	{ 5, 528000 },
-	{ 6, CPUFREQ_TABLE_END },
-#endif
 };
 #endif
 
-#define TABLE_CONFIG(m0, m1) { \
-	MACH_TYPE_##m0, \
-	msm##m1##_tbl, \
-	msm##m1##_freq_table \
-}
-
-struct freq_tbl_map {
-	unsigned int machine;
-	struct clkctl_acpu_speed *tbl;
-	struct cpufreq_frequency_table *freq_tbl;
+static struct cpufreq_frequency_table freq_table[] = {
+	{ 0, 122880 },
+	{ 1, 128000 },
+	{ 2, 245760 },
+	{ 3, 384000 },
+	{ 4, 528000 },
+	{ 5, CPUFREQ_TABLE_END },
 };
-
-static struct freq_tbl_map acpu_freq_tbl_list[] = {
-	TABLE_CONFIG(LEGEND, 7227),
-	TABLE_CONFIG(LATTE, 7227),
-	TABLE_CONFIG(LIBERTY, 7227),
-	TABLE_CONFIG(BAHAMAS, 72xx),
-	TABLE_CONFIG(MEMPHIS, 72xx),
-	TABLE_CONFIG(PARADISE, 72xx),
-	TABLE_CONFIG(BUZZ, 72xx),
-	TABLE_CONFIG(BEE, 72xx),
-	TABLE_CONFIG(BUZZC, 72xx),
-	TABLE_CONFIG(HERO, 72xx),
-	TABLE_CONFIG(SAPPHIRE, 72xx),
-	TABLE_CONFIG(HEROC, 72xx),
-	TABLE_CONFIG(DESIREC, 72xx),
-	{ 0, 0, 0}
-};
-
-static int acpu_debug_mask;
-module_param_call(debug_mask, param_set_int, param_get_int,
-		&acpu_debug_mask, S_IWUSR | S_IRUGO);
 
 static int pc_pll_request(unsigned id, unsigned on)
 {
 	int res;
 	on = !!on;
 
-	if (acpu_debug_mask & PERF_SWITCH_PLL_DEBUG) {
-		if (on)
-			printk(KERN_DEBUG "Enabling PLL %d\n", id);
-		else
-			printk(KERN_DEBUG "Disabling PLL %d\n", id);
-	}
+#if PERF_SWITCH_DEBUG
+	if (on)
+		printk(KERN_DEBUG "Enabling PLL %d\n", id);
+	else
+		printk(KERN_DEBUG "Disabling PLL %d\n", id);
+#endif
 
 	res = msm_proc_comm(PCOM_CLKCTL_RPC_PLL_REQUEST, &id, &on);
 	if (res < 0)
 		return res;
 
-	if (acpu_debug_mask & PERF_SWITCH_PLL_DEBUG) {
-		if (on)
-			printk(KERN_DEBUG "PLL %d enabled\n", id);
-		else
-			printk(KERN_DEBUG "PLL %d disabled\n", id);
-	}
+#if PERF_SWITCH_DEBUG
+	if (on)
+		printk(KERN_DEBUG "PLL %d enabled\n", id);
+	else
+		printk(KERN_DEBUG "PLL %d disabled\n", id);
+#endif
 	return res;
 }
 
@@ -250,38 +173,26 @@ static int pc_pll_request(unsigned id, unsigned on)
 /*----------------------------------------------------------------------------
  * ARM11 'owned' clock control
  *---------------------------------------------------------------------------*/
-module_param_call(pwrc_khz, param_set_int, param_get_int,
-		&drv_state.power_collapse_khz, S_IWUSR | S_IRUGO);
-module_param_call(wfi_khz, param_set_int, param_get_int,
-		&drv_state.wait_for_irq_khz, S_IWUSR | S_IRUGO);
 
-unsigned long acpuclk_power_collapse(int from_idle)
-{
+unsigned long acpuclk_power_collapse(void) {
 	int ret = acpuclk_get_rate();
-
-	if (ret > drv_state.power_collapse_khz) {
-		if (from_idle)
-			acpuclk_set_rate(drv_state.power_collapse_khz * 1000,
-					SETRATE_PC_IDLE);
-		else
-			acpuclk_set_rate(drv_state.power_collapse_khz * 1000,
-					SETRATE_PC);
-	}
-	return ret * 1000;
+	ret *= 1000;
+	if (ret > drv_state.power_collapse_khz)
+		acpuclk_set_rate(drv_state.power_collapse_khz, 1);
+	return ret;
 }
 
 unsigned long acpuclk_get_wfi_rate(void)
 {
-	return drv_state.wait_for_irq_khz * 1000;
+	return drv_state.wait_for_irq_khz;
 }
 
-unsigned long acpuclk_wait_for_irq(void)
-{
+unsigned long acpuclk_wait_for_irq(void) {
 	int ret = acpuclk_get_rate();
+	ret *= 1000;
 	if (ret > drv_state.wait_for_irq_khz)
-		acpuclk_set_rate(drv_state.wait_for_irq_khz * 1000,
-				SETRATE_SWFI);
-	return ret * 1000;
+		acpuclk_set_rate(drv_state.wait_for_irq_khz, 1);
+	return ret;
 }
 
 static int acpuclk_set_vdd_level(int vdd)
@@ -290,20 +201,22 @@ static int acpuclk_set_vdd_level(int vdd)
 
 	current_vdd = readl(A11S_VDD_SVS_PLEVEL_ADDR) & 0x07;
 
-	if (acpu_debug_mask & PERF_SWITCH_VDD_DEBUG)
-		printk(KERN_DEBUG "acpuclock: Switching VDD from %u -> %d\n",
-			current_vdd, vdd);
-
+#if PERF_SWITCH_DEBUG
+	printk(KERN_DEBUG "acpuclock: Switching VDD from %u -> %d\n",
+	       current_vdd, vdd);
+#endif
 	writel((1 << 7) | (vdd << 3), A11S_VDD_SVS_PLEVEL_ADDR);
 	udelay(drv_state.vdd_switch_time_us);
 	if ((readl(A11S_VDD_SVS_PLEVEL_ADDR) & 0x7) != vdd) {
-		if (acpu_debug_mask & PERF_SWITCH_VDD_DEBUG)
-			printk(KERN_ERR "acpuclock: VDD set failed\n");
+#if PERF_SWITCH_DEBUG
+		printk(KERN_ERR "acpuclock: VDD set failed\n");
+#endif
 		return -EIO;
 	}
 
-	if (acpu_debug_mask & PERF_SWITCH_VDD_DEBUG)
-		printk(KERN_DEBUG "acpuclock: VDD switched\n");
+#if PERF_SWITCH_DEBUG
+	printk(KERN_DEBUG "acpuclock: VDD switched\n");
+#endif
 	return 0;
 }
 
@@ -375,7 +288,7 @@ static void acpuclk_set_div(const struct clkctl_acpu_speed *hunt_s) {
 	}
 }
 
-int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
+int acpuclk_set_rate(unsigned long rate, int for_power_collapse)
 {
 	uint32_t reg_clkctl;
 	struct clkctl_acpu_speed *cur_s, *tgt_s, *strt_s;
@@ -400,8 +313,7 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 		return -EINVAL;
 
 	/* Choose the highest speed speed at or below 'rate' with same PLL. */
-	if (reason != SETRATE_CPUFREQ
-	    && tgt_s->a11clk_khz < cur_s->a11clk_khz) {
+	if (for_power_collapse && tgt_s->a11clk_khz < cur_s->a11clk_khz) {
 		while (tgt_s->pll != ACPU_PLL_TCXO && tgt_s->pll != cur_s->pll)
 			tgt_s--;
 	}
@@ -409,7 +321,7 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 	if (strt_s->pll != ACPU_PLL_TCXO)
 		plls_enabled |= 1 << strt_s->pll;
 
-	if (reason == SETRATE_CPUFREQ) {
+	if (!for_power_collapse) {
 		mutex_lock(&drv_state.lock);
 		if (strt_s->pll != tgt_s->pll && tgt_s->pll != ACPU_PLL_TCXO) {
 			rc = pc_pll_request(tgt_s->pll, 1);
@@ -427,14 +339,6 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 				goto out;
 			}
 		}
-	} else {
-		/* Power collapse should also increase VDD. */
-		if (tgt_s->vdd > cur_s->vdd) {
-			if ((rc = acpuclk_set_vdd_level(tgt_s->vdd)) < 0) {
-				printk(KERN_ERR "Unable to switch ACPU vdd\n");
-				goto out;
-			}
-		}
 	}
 
 	/* Set wait states for CPU inbetween frequency changes */
@@ -442,10 +346,10 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 	reg_clkctl |= (100 << 16); /* set WT_ST_CNT */
 	writel(reg_clkctl, A11S_CLK_CNTL_ADDR);
 
-	if (acpu_debug_mask & PERF_SWITCH_DEBUG)
-		printk(KERN_INFO "%s: Switching from ACPU rate %u -> %u\n",
-			__func__, strt_s->a11clk_khz * 1000,
-			tgt_s->a11clk_khz * 1000);
+#if PERF_SWITCH_DEBUG
+	printk(KERN_INFO "acpuclock: Switching from ACPU rate %u -> %u\n",
+	       strt_s->a11clk_khz * 1000, tgt_s->a11clk_khz * 1000);
+#endif
 
 	while (cur_s != tgt_s) {
 		/*
@@ -468,12 +372,11 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 		} else {
 			cur_s = tgt_s;
 		}
-		if (acpu_debug_mask & PERF_SWITCH_STEP_DEBUG)
-			printk(KERN_DEBUG "%s: STEP khz = %u, pll = %d\n",
-				__func__, cur_s->a11clk_khz, cur_s->pll);
-
-		/* Power collapse should also request pll.(19.2->528) */
-		if (cur_s->pll != ACPU_PLL_TCXO
+#if PERF_SWITCH_STEP_DEBUG
+		printk(KERN_DEBUG "%s: STEP khz = %u, pll = %d\n",
+			__FUNCTION__, cur_s->a11clk_khz, cur_s->pll);
+#endif
+		if (!for_power_collapse&& cur_s->pll != ACPU_PLL_TCXO
 		    && !(plls_enabled & (1 << cur_s->pll))) {
 			rc = pc_pll_request(cur_s->pll, 1);
 			if (rc < 0) {
@@ -492,20 +395,8 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 	}
 
 	/* Nothing else to do for power collapse. */
-	if (reason == SETRATE_SWFI || reason == SETRATE_PC_IDLE)
+	if (for_power_collapse)
 		return 0;
-
-	/* Change the AXI bus frequency if we can. */
-	if (strt_s->axiclk_khz != tgt_s->axiclk_khz) {
-		rc = clk_set_rate(ebi1_clk, tgt_s->axiclk_khz * 1000);
-		if (rc < 0)
-			pr_err("Setting AXI min rate failed!\n");
-	}
-
-#if !defined(CONFIG_ARCH_MSM7227)
-	if (reason == SETRATE_PC)
-		return 0;
-#endif
 
 	/* Disable PLLs we are not using anymore. */
 	plls_enabled &= ~(1 << tgt_s->pll);
@@ -518,8 +409,12 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 			}
 		}
 
-	if (reason == SETRATE_PC)
-		return 0;
+	/* Change the AXI bus frequency if we can. */
+	if (strt_s->axiclk_khz != tgt_s->axiclk_khz) {
+		rc = clk_set_rate(ebi1_clk, tgt_s->axiclk_khz * 1000);
+		if (rc < 0)
+			pr_err("Setting AXI min rate failed!\n");
+	}
 
 	/* Drop VDD level if we can. */
 	if (tgt_s->vdd < strt_s->vdd) {
@@ -527,11 +422,11 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 			printk(KERN_ERR "acpuclock: Unable to drop ACPU vdd\n");
 	}
 
-	if (acpu_debug_mask & PERF_SWITCH_DEBUG)
-		printk(KERN_DEBUG "%s: ACPU speed change complete\n",
-				__func__);
+#if PERF_SWITCH_DEBUG
+	printk(KERN_DEBUG "%s: ACPU speed change complete\n", __FUNCTION__);
+#endif
 out:
-	if (reason == SETRATE_CPUFREQ)
+	if (!for_power_collapse)
 		mutex_unlock(&drv_state.lock);
 	return rc;
 }
@@ -545,6 +440,7 @@ static void __init acpuclk_init(void)
 	/*
 	 * Determine the rate of ACPU clock
 	 */
+
 	if (!(readl(A11S_CLK_SEL_ADDR) & 0x01)) { /* CLK_SEL_SRC1N0 */
 		/* CLK_SRC0_SEL */
 		sel = (readl(A11S_CLK_CNTL_ADDR) >> 12) & 0x7;
@@ -591,69 +487,9 @@ uint32_t acpuclk_get_switch_time(void)
 	return drv_state.acpu_switch_time_us;
 }
 
-static ssize_t acpuclk_tbl_show(struct device *dev,
-		struct device_attribute *attr, char *buffer)
-{
-	char buf[16];
-	ssize_t result = 0;
-	int i = 0;
-
-	if (freq_table == NULL) {
-		pr_info("No frequency table!\n");
-		return 0;
-	}
-
-	while (freq_table[i].frequency != CPUFREQ_TABLE_END) {
-		if (freq_table[i].frequency >=
-		    CONFIG_MSM_CPU_FREQ_ONDEMAND_MIN) {
-			memset(buf, 0, 16);
-			result += sprintf(buf, "%u,", freq_table[i].frequency);
-			strcat(buffer, buf);
-		}
-
-		i++;
-	}
-
-	buffer[result-1] = '\n';
-	return result;
-}
 /*----------------------------------------------------------------------------
  * Clock driver initialization
  *---------------------------------------------------------------------------*/
-static DEVICE_ATTR(acpuclk_tbl, 0444, acpuclk_tbl_show, NULL);
-
-static struct kobject *acpuclock_kobj;
-
-static void __init acpu_freq_tbl_fixup(void)
-{
-	int ret;
-	struct freq_tbl_map *lst;
-
-	/* Select the right table to use. */
-	for (lst = acpu_freq_tbl_list; lst->tbl != 0; lst++) {
-		if (lst->machine == machine_arch_type) {
-			acpu_freq_tbl = lst->tbl;
-			freq_table = lst->freq_tbl;
-			break;
-		}
-	}
-
-	if (acpu_freq_tbl == NULL) {
-		pr_info("Unknown frequency table!\n");
-		return;
-	}
-
-	acpuclock_kobj = kobject_create_and_add("acpuclock", NULL);
-	if (acpuclock_kobj == NULL) {
-		pr_info("msm_acpu_clock_init: subsystem_register failed\n");
-		return;
-	}
-
-	ret = sysfs_create_file(acpuclock_kobj, &dev_attr_acpuclk_tbl.attr);
-
-	if (ret)
-		pr_info("msm_acpu_clock_init: sysfs_create_group failed\n");
-}
 
 /* Initalize the lpj field in the acpu_freq_tbl. */
 static void __init lpj_init(void)
@@ -679,10 +515,9 @@ void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
 	drv_state.vdd_switch_time_us = clkdata->vdd_switch_time_us;
 	drv_state.power_collapse_khz = clkdata->power_collapse_khz;
 	drv_state.wait_for_irq_khz = clkdata->wait_for_irq_khz;
-	acpu_freq_tbl_fixup();
 	acpuclk_init();
 	lpj_init();
-#ifdef CONFIG_CPU_FREQ
+#ifdef CONFIG_CPU_FREQ_TABLE
 	cpufreq_frequency_table_get_attr(freq_table, smp_processor_id());
 #endif
 }

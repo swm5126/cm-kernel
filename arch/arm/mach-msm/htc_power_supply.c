@@ -56,6 +56,7 @@ struct dock_state {
 
 static struct workqueue_struct *dock_wq;
 static struct work_struct dock_work;
+static struct wake_lock dock_work_wake_lock;
 static struct dock_state ds = {
 	.lock = __MUTEX_INITIALIZER(ds.lock),
 };
@@ -66,11 +67,6 @@ static struct dock_state ds = {
 #define dock_out2(n) gpio_set_value(_GPIO_DOCK, n)
 #define dock_in() gpio_direction_input(_GPIO_DOCK)
 #define dock_read() gpio_get_value(_GPIO_DOCK)
-
-void msm_enable_fast_timer(void);
-void msm_disable_fast_timer(void);
-uint32_t msm_read_fast_timer(void);
-uint32_t msm_read_fast_timer_raw(void);
 
 #define MFM_DELAY_NS 10000
 
@@ -91,7 +87,7 @@ static int dock_get_edge(struct dock_state *s, u32 timeout, u32 tmin, u32 tmax)
 				return -1;
 			return 1;
 		}
-	} while ((s32)(t - timeout) < 0);
+	} while((s32)(t - timeout) < 0);
 	return 0;
 }
 
@@ -419,7 +415,7 @@ static int power_get_property(struct power_supply *psy,
 	if (psy->type == POWER_SUPPLY_TYPE_MAINS) {
 		val->intval = (vbus_present && (usb_status == 2 || dock_mains));
 	} else {
-		val->intval = (vbus_present && (usb_status == 1));
+		val->intval = vbus_present;
 	}
 	return 0;
 }
@@ -492,16 +488,16 @@ static void dock_work_proc(struct work_struct *work)
 		msm_hsusb_set_vbus_state(0);
 		dock_mains = !!(dockid & 0x80);
 		switch_set_state(&dock_switch, (dockid & 1) ? 2 : 1);
-		power_supply_changed(&ac_supply);
-		power_supply_changed(&usb_supply);
-		return;
+		goto done;
 	}
 no_dock:
 	dock_mains = false;
 	switch_set_state(&dock_switch, 0);
 	msm_hsusb_set_vbus_state(vbus_present);
+done:
 	power_supply_changed(&ac_supply);
 	power_supply_changed(&usb_supply);
+	wake_unlock(&dock_work_wake_lock);
 }
 
 static int htc_battery_probe(struct platform_device *pdev)
@@ -573,6 +569,7 @@ static int handle_battery_call(struct msm_rpc_server *server,
 	args->status = !!args->status;
 
 	vbus_present = args->status;
+	wake_lock(&dock_work_wake_lock);
 	queue_work(dock_wq, &dock_work);
 	return 0;
 }
@@ -599,7 +596,9 @@ static struct msm_rpc_server battery_server = {
 static int __init htc_battery_init(void)
 {
 	int ret;
+	gpio_request(_GPIO_DOCK, "dock");
 	dock_in();
+	wake_lock_init(&dock_work_wake_lock, WAKE_LOCK_SUSPEND, "dock");
 	platform_driver_register(&htc_battery_driver);
 	msm_rpc_create_server(&battery_server);
 	if (switch_dev_register(&dock_switch) == 0) {

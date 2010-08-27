@@ -31,7 +31,6 @@
 #include <linux/serial.h>
 #include <linux/clk.h>
 #include <linux/platform_device.h>
-#include <mach/msm_serial_hs.h>
 
 #include "msm_serial.h"
 
@@ -119,12 +118,11 @@ static void msm_enable_ms(struct uart_port *port)
 
 #ifdef CONFIG_SERIAL_MSM_CLOCK_CONTROL
 /* turn clock off if TX buffer is empty, otherwise reschedule */
-static enum hrtimer_restart msm_serial_clock_off(struct hrtimer *timer)
-{
+static enum hrtimer_restart msm_serial_clock_off(struct hrtimer *timer) {
 	struct msm_port *msm_port = container_of(timer, struct msm_port,
 						 clk_off_timer);
 	struct uart_port *port = &msm_port->uart;
-	struct circ_buf *xmit = &port->info->xmit;
+	struct circ_buf *xmit = &port->state->xmit;
 	unsigned long flags;
 	int ret = HRTIMER_NORESTART;
 
@@ -147,8 +145,7 @@ static enum hrtimer_restart msm_serial_clock_off(struct hrtimer *timer)
 }
 
 /* request to turn off uart clock once pending TX is flushed */
-void msm_serial_clock_request_off(struct uart_port *port)
-{
+void msm_serial_clock_request_off(struct uart_port *port) {
 	unsigned long flags;
 	struct msm_port *msm_port = UART_TO_MSM(port);
 
@@ -168,8 +165,7 @@ void msm_serial_clock_request_off(struct uart_port *port)
 /* request to immediately turn on uart clock.
  * ignored if there is a pending off request, unless force = 1.
  */
-void msm_serial_clock_on(struct uart_port *port, int force)
-{
+void msm_serial_clock_on(struct uart_port *port, int force) {
 	unsigned long flags;
 	struct msm_port *msm_port = UART_TO_MSM(port);
 
@@ -211,7 +207,7 @@ static irqreturn_t msm_rx_irq(int irq, void *dev_id)
 	/* we missed an rx while asleep - it must be a wakeup indicator
 	 */
 	if (inject_wakeup) {
-		struct tty_struct *tty = port->info->port.tty;
+		struct tty_struct *tty = port->state->port.tty;
 		tty_insert_flip_char(tty, WAKE_UP_IND, TTY_NORMAL);
 		tty_flip_buffer_push(tty);
 	}
@@ -223,7 +219,7 @@ static irqreturn_t msm_rx_irq(int irq, void *dev_id)
 
 static void handle_rx(struct uart_port *port)
 {
-	struct tty_struct *tty = port->info->port.tty;
+	struct tty_struct *tty = port->state->port.tty;
 	unsigned int sr;
 
 	/*
@@ -256,10 +252,11 @@ static void handle_rx(struct uart_port *port)
 		/* Mask conditions we're ignorning. */
 		sr &= port->read_status_mask;
 
-		if (sr & UART_SR_RX_BREAK)
+		if (sr & UART_SR_RX_BREAK) {
 			flag = TTY_BREAK;
-		else if (sr & UART_SR_PAR_FRAME_ERR)
+		} else if (sr & UART_SR_PAR_FRAME_ERR) {
 			flag = TTY_FRAME;
+		}
 
 		if (!uart_handle_sysrq_char(port, c))
 			tty_insert_flip_char(tty, c, flag);
@@ -270,7 +267,7 @@ static void handle_rx(struct uart_port *port)
 
 static void handle_tx(struct uart_port *port)
 {
-	struct circ_buf *xmit = &port->info->xmit;
+	struct circ_buf *xmit = &port->state->xmit;
 	struct msm_port *msm_port = UART_TO_MSM(port);
 	int sent_tx;
 
@@ -311,7 +308,7 @@ static void handle_delta_cts(struct uart_port *port)
 {
 	msm_write(port, UART_CR_CMD_RESET_CTS, UART_CR);
 	port->icount.cts++;
-	wake_up_interruptible(&port->info->delta_msr_wait);
+	wake_up_interruptible(&port->state->port.delta_msr_wait);
 }
 
 static irqreturn_t msm_irq(int irq, void *dev_id)
@@ -391,7 +388,7 @@ static void msm_break_ctl(struct uart_port *port, int break_ctl)
 	clk_disable(msm_port->clk);
 }
 
-static void msm_set_baud_rate(struct uart_port *port, unsigned int baud)
+static int msm_set_baud_rate(struct uart_port *port, unsigned int baud)
 {
 	unsigned int baud_code, rxstale, watermark;
 
@@ -443,6 +440,7 @@ static void msm_set_baud_rate(struct uart_port *port, unsigned int baud)
 	case 115200:
 	default:
 		baud_code = UART_CSR_115200;
+		baud = 115200;
 		rxstale = 31;
 		break;
 	}
@@ -461,6 +459,8 @@ static void msm_set_baud_rate(struct uart_port *port, unsigned int baud)
 
 	/* set TX watermark */
 	msm_write(port, 10, UART_TFWR);
+
+	return baud;
 }
 
 static void msm_reset(struct uart_port *port)
@@ -484,7 +484,6 @@ static void msm_init_clock(struct uart_port *port)
 	msm_port->clk_state = MSM_CLK_ON;
 #endif
 
-#if defined(CONFIG_ARCH_QSD8X50)
 	if (port->uartclk == 19200000) {
 		/* clock is TCXO (19.2MHz) */
 		msm_write(port, 0x06, UART_MREG);
@@ -498,12 +497,6 @@ static void msm_init_clock(struct uart_port *port)
 		msm_write(port, 0x7D, UART_DREG);
 		msm_write(port, 0x1C, UART_MNDREG);
 	}
-#else
-	msm_write(port, 0xC0, UART_MREG);
-	msm_write(port, 0xB2, UART_NREG);
-	msm_write(port, 0x7D, UART_DREG);
-	msm_write(port, 0x1C, UART_MNDREG);
-#endif
 }
 
 static int msm_startup(struct uart_port *port)
@@ -605,8 +598,10 @@ static void msm_set_termios(struct uart_port *port, struct ktermios *termios,
 
 	/* calculate and set baud rate */
 	baud = uart_get_baud_rate(port, termios, old, 300, 115200);
-	msm_set_baud_rate(port, baud);
-
+	baud = msm_set_baud_rate(port, baud);
+	if (tty_termios_baud_rate(termios))
+		tty_termios_encode_baud_rate(termios, baud, baud);
+	
 	/* calculate parity */
 	mr = msm_read(port, UART_MR2);
 	mr &= ~UART_MR2_PARITY_MODE;
@@ -882,7 +877,7 @@ static struct console msm_console = {
 	.data = &msm_uart_driver,
 };
 
-#define MSM_CONSOLE	&msm_console
+#define MSM_CONSOLE	(&msm_console)
 
 #else
 #define MSM_CONSOLE	NULL
@@ -901,7 +896,6 @@ static int __init msm_serial_probe(struct platform_device *pdev)
 	struct msm_port *msm_port;
 	struct resource *resource;
 	struct uart_port *port;
-	struct msm_serial_platform_data *pdata = pdev->dev.platform_data;
 
 	if (unlikely(pdev->id < 0 || pdev->id >= UART_NR))
 		return -ENXIO;
@@ -923,16 +917,13 @@ static int __init msm_serial_probe(struct platform_device *pdev)
 	port->mapbase = resource->start;
 
 	port->irq = platform_get_irq(pdev, 0);
-	/*
 	if (unlikely(port->irq < 0))
 		return -ENXIO;
-	*/
 
 	platform_set_drvdata(pdev, port);
 
 	if (unlikely(set_irq_wake(port->irq, 1)))
 		return -ENXIO;
-
 
 #ifdef CONFIG_SERIAL_MSM_RX_WAKEUP
 	if (port->line == 0)  /* BT is serial device 0 */
@@ -942,8 +933,7 @@ static int __init msm_serial_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_SERIAL_MSM_CLOCK_CONTROL
 	msm_port->clk_state = MSM_CLK_PORT_OFF;
-	hrtimer_init(&msm_port->clk_off_timer,
-		CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrtimer_init(&msm_port->clk_off_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	msm_port->clk_off_timer.function = msm_serial_clock_off;
 	msm_port->clk_off_delay = ktime_set(0, 1000000);  /* 1 ms */
 #endif
@@ -961,7 +951,6 @@ static int __devexit msm_serial_remove(struct platform_device *pdev)
 }
 
 static struct platform_driver msm_platform_driver = {
-	.probe = msm_serial_probe,
 	.remove = msm_serial_remove,
 	.driver = {
 		.name = "msm_serial",

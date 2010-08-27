@@ -120,7 +120,7 @@ static int smd_tty_open(struct tty_struct *tty, struct file *f)
 	} else if (n == 1) {
 		name = "SMD_DIAG";
 	} else if (n == 9) {
-#if defined(CONFIG_MACH_DESIREC)
+#if defined(CONFIG_MACH_DESIREC) || defined(CONFIG_ARCH_MSM7X30)
 		name = "SMD_DATA4";
 #else
 		name = "SMD_DATA9";
@@ -154,10 +154,12 @@ static int smd_tty_open(struct tty_struct *tty, struct file *f)
 			smd_kick(info->ch);
 		} else {
 			res = smd_open(name, &info->ch, info, smd_tty_notify);
+#ifdef CONFIG_ARCH_QSD8X50
 			/* 8x50 smd bug: channel open is too late to handle
 			 * smd write request */
 			if (n == 19)
 				smd_wait_until_opened(info->ch, 200);
+#endif
 		}
 	}
 	mutex_unlock(&smd_tty_lock);
@@ -171,6 +173,8 @@ static void smd_tty_close(struct tty_struct *tty, struct file *f)
 
 	if (info == 0)
 		return;
+	/* wait for the work in workqueue to complete */
+	flush_work(&info->tty_work);
 
 	mutex_lock(&smd_tty_lock);
 	if (--info->open_count == 0) {

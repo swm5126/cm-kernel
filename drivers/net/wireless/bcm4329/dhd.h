@@ -4,14 +4,14 @@
  * Provides type definitions and function prototypes used to link the
  * DHD OS, bus, and protocol modules.
  *
- * Copyright (C) 1999-2009, Broadcom Corporation
- *
+ * Copyright (C) 1999-2010, Broadcom Corporation
+ * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -19,12 +19,12 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd.h,v 1.32.4.7.2.4.14.25 2009/10/27 04:41:56 Exp $
+ * $Id: dhd.h,v 1.32.4.7.2.4.14.29 2010/02/23 06:58:21 Exp $
  */
 
 /****************
@@ -50,19 +50,15 @@
 /* The kernel threading is sdio-specific */
 #else /* LINUX */
 #define ENOMEM		1
-#define EFAULT		2
+#define EFAULT      2
 #define EINVAL		3
-#define EIO		4
+#define EIO			4
 #define ETIMEDOUT	5
-#define ERESTARTSYS	6
+#define ERESTARTSYS 6
 #endif /* LINUX */
 
 #include <wlioctl.h>
 
-#ifdef NDIS60
-#include <wdf.h>
-#include <WdfMiniport.h>
-#endif /* NDIS60 */
 
 /* Forward decls */
 struct dhd_bus;
@@ -85,6 +81,9 @@ enum dhd_bus_wake_state {
 	WAKE_LOCK_TMOUT,
 	WAKE_LOCK_WATCHDOG,
 	WAKE_LOCK_LINK_DOWN_TMOUT,
+	WAKE_LOCK_SOFTAP_SET,
+	WAKE_LOCK_SOFTAP_STOP,
+	WAKE_LOCK_SOFTAP_START,
 	WAKE_LOCK_MAX
 };
 enum dhd_prealloc_index {
@@ -149,17 +148,6 @@ typedef struct dhd_pub {
 	uint8 country_code[WLC_CNTRY_BUF_SZ];
 } dhd_pub_t;
 
-#ifdef NDIS60
-
-typedef struct _wdf_device_info {
-	dhd_pub_t *dhd;
-} wdf_device_info_t;
-
-WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(wdf_device_info_t, dhd_get_wdf_device_info)
-
-
-#endif /* NDIS60 */
-
 	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined(CONFIG_PM_SLEEP)
 
 	#define DHD_PM_RESUME_WAIT_INIT(a) DECLARE_WAIT_QUEUE_HEAD(a);
@@ -208,7 +196,6 @@ extern int dhd_os_wake_lock(dhd_pub_t *pub);
 extern int dhd_os_wake_unlock(dhd_pub_t *pub);
 extern int dhd_os_wake_lock_timeout(dhd_pub_t *pub);
 extern int dhd_os_wake_lock_timeout_enable(dhd_pub_t *pub);
-extern void dhd_htc_wake_lock_timeout(struct dhd_info *dhd, int sec);
 
 typedef struct dhd_if_event {
 	uint8 ifidx;
@@ -276,8 +263,10 @@ extern void dhd_os_sdunlock_rxq(dhd_pub_t * pub);
 extern void dhd_os_sdlock_sndup_rxq(dhd_pub_t * pub);
 extern void dhd_customer_gpio_wlan_ctrl(int onoff);
 extern void dhd_os_sdunlock_sndup_rxq(dhd_pub_t * pub);
+extern void dhd_os_sdlock_eventq(dhd_pub_t * pub);
+extern void dhd_os_sdunlock_eventq(dhd_pub_t * pub);
 #if defined(OOB_INTR_ONLY)
-extern int dhd_customer_oob_irq_map(void);
+extern int dhd_customer_oob_irq_map(unsigned long *irq_flags_ptr);
 #endif /* defined(OOB_INTR_ONLY) */
 extern void dhd_os_sdtxlock(dhd_pub_t * pub);
 extern void dhd_os_sdtxunlock(dhd_pub_t * pub);
@@ -330,6 +319,7 @@ typedef enum cust_gpio_modes {
 	WLAN_POWER_ON,
 	WLAN_POWER_OFF
 } cust_gpio_modes_t;
+extern int wl_iw_iscan_set_scan_broadcast_prep(struct net_device *dev, uint flag);
 /*
  * Insmod parameters for debug/test
  */
@@ -380,24 +370,5 @@ extern char nv_path[MOD_PARAM_PATHLEN];
 
 extern void dhd_wait_for_event(dhd_pub_t *dhd, bool *lockvar);
 extern void dhd_wait_event_wakeup(dhd_pub_t*dhd);
-
-#ifdef WLAN_PFN
-#define MAX_PFN_NUMBER	2
-#define PFN_SCAN_FREQ	60 /* in secs */
-#define PFN_WAKE_TIME	20000	/* in mini secs */
-int dhd_set_pfn_ssid(char * ssid, int ssid_len);
-#endif
-
-
-/* Packet Filter */
-enum pkt_filter_id {
-	ALLOW_UNICAST = 100,
-	ALLOW_ARP,
-	ALLOW_DHCP,
-	ALLOW_IPV4_MULTICAST,
-	ALLOW_IPV6_MULTICAST,
-};
-int dhd_set_pktfilter(int add, int id, int offset, char *mask, char *pattern);
-
 
 #endif /* _dhd_h_ */

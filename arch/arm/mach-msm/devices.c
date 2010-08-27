@@ -17,10 +17,14 @@
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/delay.h>
+#include <linux/gpio.h>
 
 #include <mach/irqs.h>
 #include <mach/msm_iomap.h>
 #include <mach/dma.h>
+#include <mach/board.h>
+
+#include "smd_private.h"
 
 #include <asm/mach/flash.h>
 #include <linux/mtd/nand.h>
@@ -32,15 +36,25 @@
 #include "clock.h"
 #include "proc_comm.h"
 #include <mach/msm_hsusb.h>
-#include <linux/usb/mass_storage_function.h>
 #include <mach/msm_rpcrouter.h>
 #include <mach/msm_hsusb_hw.h>
+#ifdef CONFIG_USB_FUNCTION
+#include <linux/usb/mass_storage_function.h>
+#endif
+#ifdef CONFIG_PMIC8058
+#include <linux/mfd/pmic8058.h>
+#endif
 
 static char *df_serialno = "000000000000";
+static char *board_sn;
+int usb_phy_error;
 
 #define HSUSB_API_INIT_PHY_PROC	2
 #define HSUSB_API_PROG		0x30000064
 #define HSUSB_API_VERS MSM_RPC_VERS(1, 1)
+
+#define MFG_GPIO_TABLE_MAX_SIZE        0x400
+static unsigned char mfg_gpio_table[MFG_GPIO_TABLE_MAX_SIZE];
 
 static void internal_phy_reset(void)
 {
@@ -63,7 +77,6 @@ static void internal_phy_reset(void)
 	if (rc < 0)
 		printk(KERN_ERR "%s: rpc call failed! (%d)\n", __func__, rc);
 
-close:
 	msm_rpc_close(usb_ep);
 }
 
@@ -244,8 +257,10 @@ void msm_hsusb_8x50_phy_reset(void)
 	temp = (readl(USB_PORTSC) & ~PORTSC_PTS);
 	writel(temp | PORTSC_PTS_ULPI, USB_PORTSC);
 
-	if (msm_hsusb_phy_caliberate(usb_base))
+	if (msm_hsusb_phy_caliberate(usb_base)) {
+		usb_phy_error = 1;
 		return;
+	}
 
 	/* soft reset phy */
 	writel(USBCMD_RESET, USB_USBCMD);
@@ -257,6 +272,7 @@ void msm_hsusb_8x50_phy_reset(void)
 		}
 		msleep(1);
 	}
+	usb_phy_error = 0;
 
 	return;
 }
@@ -277,6 +293,9 @@ static char *usb_functions[] = {
 #endif
 #if defined(CONFIG_USB_FUNCTION_MODEM)
 	"serial",
+#endif
+#if defined(CONFIG_USB_FUNCTION_PROJECTOR)
+	"projector",
 #endif
 #if defined(CONFIG_USB_FUNCTION_MTP_TUNNEL)
 	"mtp_tunnel",
@@ -366,7 +385,7 @@ struct msm_hsusb_platform_data msm_hsusb_pdata = {
 #ifdef CONFIG_USB_FUNCTION
 static struct usb_mass_storage_platform_data mass_storage_pdata = {
 	.nluns = 1,
-	.buf_size = 16384,
+//	.buf_size = 16384,
 	.vendor = "HTC     ",
 	.product = "Android Phone   ",
 	.release = 0x0100,
@@ -381,26 +400,6 @@ static struct platform_device usb_mass_storage_device = {
 };
 #endif
 
-#ifdef CONFIG_USB_ANDROID
-static struct android_usb_platform_data android_usb_pdata = {
-	.vendor_id	= 0x0bb4,
-	.product_id	= 0x0c01,
-	.adb_product_id	= 0x0c02,
-	.version	= 0x0100,
-	.product_name	= "Android Phone",
-	.manufacturer_name = "HTC",
-	.nluns = 1,
-};
-
-static struct platform_device android_usb_device = {
-	.name	= "android_usb",
-	.id		= -1,
-	.dev		= {
-		.platform_data = &android_usb_pdata,
-	},
-};
-#endif
-
 static struct resource resources_hsusb[] = {
 	{
 		.start	= MSM_HSUSB_PHYS,
@@ -412,6 +411,14 @@ static struct resource resources_hsusb[] = {
 		.end	= INT_USB_HS,
 		.flags	= IORESOURCE_IRQ,
 	},
+#ifdef CONFIG_ARCH_MSM7X30
+	{
+		.name	= "vbus_on",
+		.start	= PM8058_IRQ_CHGVAL,
+		.end	= PM8058_IRQ_CHGVAL,
+		.flags	= IORESOURCE_IRQ,
+	},
+#endif
 };
 
 struct platform_device msm_device_hsusb = {
@@ -433,12 +440,26 @@ void __init msm_add_usb_devices(void (*phy_reset) (void), void (*phy_shutdown) (
 
 	msm_device_hsusb.dev.platform_data = &msm_hsusb_pdata;
 	platform_device_register(&msm_device_hsusb);
-#ifdef CONFIG_USB_FUNCTION_MASS_STORAGE
+#ifdef CONFIG_USB_FUNCTION
 	platform_device_register(&usb_mass_storage_device);
 #endif
-#ifdef CONFIG_USB_ANDROID
-	platform_device_register(&android_usb_device);
-#endif
+}
+
+#ifdef CONFIG_USB_FUNCTION
+void __init msm_set_ums_device_id(int id)
+{
+	usb_mass_storage_device.id = id;
+}
+
+void __init msm_add_usb_id_pin_function(void (*config_usb_id_gpios)(bool enable))
+{
+	/* setup */
+	msm_hsusb_pdata.config_usb_id_gpios = config_usb_id_gpios;
+
+}
+void __init msm_enable_car_kit_detect(bool enable)
+{
+	msm_hsusb_pdata.enable_car_kit_detect = enable;
 }
 
 void __init msm_init_ums_lun(int lun_num)
@@ -453,7 +474,7 @@ void __init msm_register_usb_phy_init_seq(int *int_seq)
 		msm_hsusb_pdata.phy_init_seq = int_seq;
 }
 
-void __init msm_register_uart_usb_switch(int (*usb_uart_switch) (int))
+void __init msm_register_uart_usb_switch(void (*usb_uart_switch) (int))
 {
 	if (usb_uart_switch)
 		msm_hsusb_pdata.usb_uart_switch = usb_uart_switch;
@@ -469,6 +490,7 @@ void __init msm_hsusb_set_product(struct msm_hsusb_product *product,
 	msm_hsusb_pdata.products = product;
 	msm_hsusb_pdata.num_products = num_products;
 }
+#endif
 
 static struct resource resources_uart1[] = {
 	{
@@ -616,6 +638,28 @@ struct platform_device msm_device_uart_dm2 = {
 	},
 };
 
+#ifdef CONFIG_ARCH_MSM7X30
+static struct resource resources_i2c_2[] = {
+	{
+		.start	= MSM_I2C_2_PHYS,
+		.end	= MSM_I2C_2_PHYS + MSM_I2C_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= INT_PWB_I2C_2,
+		.end	= INT_PWB_I2C_2,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+struct platform_device msm_device_i2c_2 = {
+	.name		= "msm_i2c",
+	.id		= 2,
+	.num_resources	= ARRAY_SIZE(resources_i2c_2),
+	.resource	= resources_i2c_2,
+};
+#endif
+
 static struct resource resources_i2c[] = {
 	{
 		.start	= MSM_I2C_PHYS,
@@ -636,13 +680,136 @@ struct platform_device msm_device_i2c = {
 	.resource	= resources_i2c,
 };
 
-#ifdef CONFIG_ARCH_QSD8X50
+#ifdef CONFIG_ARCH_MSM7X30
+static struct resource resources_qup[] = {
+	{
+		.name   = "qup_phys_addr",
+		.start	= MSM_QUP_PHYS,
+		.end	= MSM_QUP_PHYS + MSM_QUP_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.name   = "gsbi_qup_i2c_addr",
+		.start	= MSM_GSBI_QUP_I2C_PHYS,
+		.end	= MSM_GSBI_QUP_I2C_PHYS + 4 - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.name   = "qup_in_intr",
+		.start	= INT_PWB_QUP_IN,
+		.end	= INT_PWB_QUP_IN,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.name   = "qup_out_intr",
+		.start	= INT_PWB_QUP_OUT,
+		.end	= INT_PWB_QUP_OUT,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.name   = "qup_err_intr",
+		.start	= INT_PWB_QUP_ERR,
+		.end	= INT_PWB_QUP_ERR,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+struct platform_device qup_device_i2c = {
+	.name		= "qup_i2c",
+	.id		= 4,
+	.num_resources	= ARRAY_SIZE(resources_qup),
+	.resource	= resources_qup,
+};
+#endif
+#ifdef CONFIG_SPI_QSD_NEW
+static struct resource qsd_spi_resources[] = {
+	{
+		.name   = "spi_irq_in",
+		.start	= INT_SPI_INPUT,
+		.end	= INT_SPI_INPUT,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.name   = "spi_irq_out",
+		.start	= INT_SPI_OUTPUT,
+		.end	= INT_SPI_OUTPUT,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.name   = "spi_irq_err",
+		.start	= INT_SPI_ERROR,
+		.end	= INT_SPI_ERROR,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.name   = "spi_base",
+		.start	= 0xA8000000,
+		.end	= 0xA8000000 + SZ_4K - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+struct platform_device qsdnew_device_spi = {
+	.name		= "spi_qsd_new",
+	.id		= 0,
+	.num_resources	= ARRAY_SIZE(qsd_spi_resources),
+	.resource	= qsd_spi_resources,
+};
+#endif
+
+#ifdef CONFIG_I2C_SSBI
+#define MSM_SSBI6_PHYS	0xAD900000
+static struct resource msm_ssbi6_resources[] = {
+	{
+		.name   = "ssbi_base",
+		.start	= MSM_SSBI6_PHYS,
+		.end	= MSM_SSBI6_PHYS + SZ_4K - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+struct platform_device msm_device_ssbi6 = {
+	.name		= "i2c_ssbi",
+	.id		= 6,
+	.num_resources	= ARRAY_SIZE(msm_ssbi6_resources),
+	.resource	= msm_ssbi6_resources,
+};
+
+#define MSM_SSBI7_PHYS  0xAC800000
+static struct resource msm_ssbi7_resources[] = {
+	{
+		.name   = "ssbi_base",
+		.start  = MSM_SSBI7_PHYS,
+		.end    = MSM_SSBI7_PHYS + SZ_4K - 1,
+		.flags  = IORESOURCE_MEM,
+	},
+};
+
+struct platform_device msm_device_ssbi7 = {
+	.name		= "i2c_ssbi",
+	.id		= 7,
+	.num_resources	= ARRAY_SIZE(msm_ssbi7_resources),
+	.resource	= msm_ssbi7_resources,
+};
+#endif /* CONFIG_I2C_SSBI */
+
+#if defined(CONFIG_ARCH_MSM7X30)
+#define GPIO_I2C_CLK 70
+#define GPIO_I2C_DAT 71
+#elif defined(CONFIG_ARCH_QSD8X50)
 #define GPIO_I2C_CLK 95
 #define GPIO_I2C_DAT 96
 #else
 #define GPIO_I2C_CLK 60
 #define GPIO_I2C_DAT 61
 #endif
+
+void msm_i2c_gpio_init(void)
+{
+	gpio_request(GPIO_I2C_CLK, "i2c_clk");
+	gpio_request(GPIO_I2C_DAT, "i2c_data");
+}
+
 void msm_set_i2c_mux(bool gpio, int *gpio_clk, int *gpio_dat, int clk_str, int dat_str)
 {
 	unsigned id;
@@ -885,6 +1052,79 @@ int __init msm_add_sdcc(unsigned int controller, struct mmc_platform_data *plat,
 	return platform_device_register(pdev);
 }
 
+#ifdef CONFIG_MSM_RMT_STORAGE_SERVER
+#define RAMFS_INFO_MAGICNUMBER		0x654D4D43
+#define RAMFS_INFO_VERSION		0x00000001
+#define RAMFS_MODEMSTORAGE_ID		0x4D454653
+
+static void __init msm_register_device(struct platform_device *pdev, void *data)
+{
+	int ret;
+
+	pdev->dev.platform_data = data;
+
+	ret = platform_device_register(pdev);
+	if (ret)
+		dev_err(&pdev->dev,
+			  "%s: platform_device_register() failed = %d\n",
+			  __func__, ret);
+}
+
+static struct resource rmt_storage_resources[] = {
+       {
+		.flags  = IORESOURCE_MEM,
+       },
+};
+
+static struct platform_device rmt_storage_device = {
+       .name           = "rmt_storage",
+       .id             = -1,
+       .num_resources  = ARRAY_SIZE(rmt_storage_resources),
+       .resource       = rmt_storage_resources,
+};
+
+int __init rmt_storage_add_ramfs(void)
+{
+	struct shared_ramfs_table *ramfs_table;
+	struct shared_ramfs_entry *ramfs_entry;
+	int index;
+
+	ramfs_table = smem_alloc(SMEM_SEFS_INFO,
+			sizeof(struct shared_ramfs_table));
+
+	if (!ramfs_table) {
+		printk(KERN_WARNING "%s: No RAMFS table in SMEM\n", __func__);
+		return -ENOENT;
+	}
+
+	if ((ramfs_table->magic_id != (u32) RAMFS_INFO_MAGICNUMBER) ||
+		(ramfs_table->version != (u32) RAMFS_INFO_VERSION)) {
+		printk(KERN_WARNING "%s: Magic / Version mismatch:, "
+		       "magic_id=%#x, format_version=%#x\n", __func__,
+		       ramfs_table->magic_id, ramfs_table->version);
+		return -ENOENT;
+	}
+
+	for (index = 0; index < ramfs_table->entries; index++) {
+		ramfs_entry = &ramfs_table->ramfs_entry[index];
+
+		/* Find a match for the Modem Storage RAMFS area */
+		if (ramfs_entry->client_id == (u32) RAMFS_MODEMSTORAGE_ID) {
+			printk(KERN_INFO "%s: RAMFS Info (from SMEM): "
+				"Baseaddr = 0x%08x, Size = 0x%08x\n", __func__,
+				ramfs_entry->base_addr, ramfs_entry->size);
+
+			rmt_storage_resources[0].start = ramfs_entry->base_addr;
+			rmt_storage_resources[0].end = ramfs_entry->base_addr +
+							ramfs_entry->size - 1;
+			msm_register_device(&rmt_storage_device, ramfs_entry);
+			return 0;
+		}
+	}
+	return -ENOENT;
+}
+#endif
+
 static struct resource resources_mddi0[] = {
 	{
 		.start	= MSM_PMDH_PHYS,
@@ -952,6 +1192,28 @@ struct platform_device msm_device_mdp = {
 	.resource = resources_mdp,
 };
 
+#if defined(CONFIG_ARCH_MSM7X30)
+static struct resource msm_vidc_720p_resources[] = {
+	{
+		.start	= 0xA3B00000,
+		.end	= 0xA3B00000 + SZ_4K - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= INT_MFC720,
+		.end	= INT_MFC720,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+struct platform_device msm_device_vidc_720p = {
+	.name = "msm_vidc_720p",
+	.id = 0,
+	.num_resources = ARRAY_SIZE(msm_vidc_720p_resources),
+	.resource = msm_vidc_720p_resources,
+};
+#endif
+
 static struct resource resources_tssc[] = {
 #if defined(CONFIG_ARCH_MSM7225)
 	{
@@ -1017,6 +1279,46 @@ struct platform_device msm_device_spi = {
 };
 #endif
 
+#ifdef CONFIG_MSM_ROTATOR
+static struct resource resources_msm_rotator[] = {
+	{
+		.start	= MSM_ROTATOR_PHYS,
+		.end	= MSM_ROTATOR_PHYS + MSM_ROTATOR_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= INT_ROTATOR,
+		.end	= INT_ROTATOR,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+struct platform_device msm_rotator_device = {
+	.name		= "msm_rotator",
+	.id		= 0,
+	.num_resources  = ARRAY_SIZE(resources_msm_rotator),
+	.resource       = resources_msm_rotator,
+};
+#endif
+
+#ifdef CONFIG_MSM_SSBI
+static struct resource resources_ssbi_pmic[] = {
+	{
+		.start	= MSM_PMIC_SSBI_PHYS,
+		.end	= MSM_PMIC_SSBI_PHYS + MSM_PMIC_SSBI_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+struct platform_device msm_device_ssbi_pmic = {
+	.name		= "msm_ssbi",
+	.id		= -1,
+	.resource	= resources_ssbi_pmic,
+	.num_resources	= ARRAY_SIZE(resources_ssbi_pmic),
+};
+#endif
+
+
 #define CLOCK(clk_name, clk_id, clk_dev, clk_flags, clk_arch) {	\
 	.name = clk_name, \
 	.id = clk_id, \
@@ -1036,6 +1338,7 @@ struct platform_device msm_device_spi = {
 #define USE_MIN (CLKFLAG_USE_MIN_TO_SET | CLKFLAG_SHARED)
 
 struct clk msm_clocks[] = {
+#ifndef CONFIG_ARCH_MSM7X30
 	CLK_ALL("adm_clk", ADM_CLK, NULL, 0),
 	CLK_ALL("adsp_clk", ADSP_CLK, NULL, 0),
 	CLK_ALL("ebi1_clk", EBI1_CLK, NULL, USE_MIN),
@@ -1085,11 +1388,101 @@ struct clk msm_clocks[] = {
 	CLK_ALL("grp_pclk", GRP_PCLK, NULL, OFF),
 #endif
 	CLK_ALL("spi_clk", SPI_CLK, NULL, 0),
+	CLK_ALL("usb_phy_clk", USB_PHY_CLK, NULL, USE_MIN),
 	CLK_8X50("lcdc_pclk_clk", LCDC_PCLK, &msm_device_mdp.dev, 0),
 	CLK_8X50("lcdc_pad_pclk_clk", LCDC_PAD_PCLK, &msm_device_mdp.dev, 0),
 	CLK_8X50("mdp_vsync_clk", MDP_VSYNC_CLK, &msm_device_mdp.dev, 0),
 
 	CLOCK(NULL, 0, NULL, 0, 0),
+#else /* 7x30 clock tbl */
+	CLK_PCOM("adm_clk",	ADM_CLK,	NULL, 0),
+	CLK_PCOM("adsp_clk",	ADSP_CLK,	NULL, 0),
+	CLK_PCOM("cam_m_clk",	CAM_M_CLK,	NULL, 0),
+	CLK_PCOM("camif_pad_pclk",	CAMIF_PAD_P_CLK,	NULL, OFF),
+	CLK_PCOM("ebi1_clk",	EBI1_CLK,	NULL, USE_MIN),
+	CLK_PCOM("ecodec_clk",	ECODEC_CLK,	NULL, 0),
+	CLK_PCOM("emdh_clk",	EMDH_CLK,	NULL, OFF | MINMAX),
+	CLK_PCOM("emdh_pclk",	EMDH_P_CLK,	NULL, OFF),
+	CLK_PCOM("gp_clk",	GP_CLK,		NULL, 0),
+	CLK_PCOM("grp_2d_clk",	GRP_2D_CLK,	NULL, 0),
+	CLK_PCOM("grp_2d_pclk",	GRP_2D_P_CLK,	NULL, 0),
+	CLK_PCOM("grp_clk",	GRP_3D_CLK,	NULL, 0),
+	CLK_PCOM("grp_pclk",	GRP_3D_P_CLK,	NULL, 0),
+	CLK_7X30S("grp_src_clk", GRP_3D_SRC_CLK, GRP_3D_CLK,	NULL, 0),
+	CLK_PCOM("hdmi_clk",	HDMI_CLK,	NULL, 0),
+	CLK_PCOM("i2c_clk",	I2C_CLK,	&msm_device_i2c.dev, 0),
+	CLK_PCOM("i2c_clk",	I2C_2_CLK,	&msm_device_i2c_2.dev, 0),
+	CLK_PCOM("imem_clk",	IMEM_CLK,	NULL, OFF),
+	CLK_PCOM("jpeg_clk",	JPEG_CLK,	NULL, OFF),
+	CLK_PCOM("jpeg_pclk",	JPEG_P_CLK,	NULL, OFF),
+	CLK_PCOM("lpa_codec_clk",	LPA_CODEC_CLK,		NULL, 0),
+	CLK_PCOM("lpa_core_clk",	LPA_CORE_CLK,		NULL, 0),
+	CLK_PCOM("lpa_pclk",		LPA_P_CLK,		NULL, 0),
+	CLK_PCOM("mdc_clk",	MDC_CLK,	NULL, 0),
+	CLK_PCOM("mddi_clk",	PMDH_CLK,	NULL, OFF | MINMAX),
+	CLK_PCOM("mddi_pclk",	PMDH_P_CLK,	NULL, 0),
+	CLK_PCOM("mdp_clk",	MDP_CLK,	NULL, OFF),
+	CLK_PCOM("mdp_pclk",	MDP_P_CLK,	NULL, 0),
+	/*Original is mdp_lcdc_pclk_clk and mdp_lcdc_pad_pclk_clk*/
+	CLK_PCOM("lcdc_pclk_clk", MDP_LCDC_PCLK_CLK, NULL, OFF),
+	CLK_PCOM("lcdc_pad_pclk_clk", MDP_LCDC_PAD_PCLK_CLK, NULL, OFF),
+	CLK_PCOM("mdp_vsync_clk",	MDP_VSYNC_CLK,  NULL, 0),
+	CLK_PCOM("mfc_clk",		MFC_CLK,		NULL, 0),
+	CLK_PCOM("mfc_div2_clk",	MFC_DIV2_CLK,		NULL, 0),
+	CLK_PCOM("mfc_pclk",		MFC_P_CLK,		NULL, 0),
+	CLK_PCOM("mi2s_codec_rx_m_clk",	MI2S_CODEC_RX_M_CLK,  NULL, 0),
+	CLK_PCOM("mi2s_codec_rx_s_clk",	MI2S_CODEC_RX_S_CLK,  NULL, 0),
+	CLK_PCOM("mi2s_codec_tx_m_clk",	MI2S_CODEC_TX_M_CLK,  NULL, 0),
+	CLK_PCOM("mi2s_codec_tx_s_clk",	MI2S_CODEC_TX_S_CLK,  NULL, 0),
+	CLK_PCOM("pbus_clk",	PBUS_CLK,	NULL, USE_MIN),
+	CLK_PCOM("pcm_clk",	PCM_CLK,	NULL, 0),
+	CLK_PCOM("qup_clk",	QUP_I2C_CLK,	&qup_device_i2c.dev, 0),
+	CLK_PCOM("rotator_clk",	AXI_ROTATOR_CLK,		NULL, 0),
+	CLK_PCOM("rotator_imem_clk",	ROTATOR_IMEM_CLK,	NULL, OFF),
+	CLK_PCOM("rotator_pclk",	ROTATOR_P_CLK,		NULL, OFF),
+	CLK_PCOM("sdac_clk",	SDAC_CLK,	NULL, OFF),
+	CLK_PCOM("sdc_clk",	SDC1_CLK,	&msm_device_sdc1.dev, OFF),
+	CLK_PCOM("sdc_pclk",	SDC1_P_CLK,	&msm_device_sdc1.dev, OFF),
+	CLK_PCOM("sdc_clk",	SDC2_CLK,	&msm_device_sdc2.dev, OFF),
+	CLK_PCOM("sdc_pclk",	SDC2_P_CLK,	&msm_device_sdc2.dev, OFF),
+	CLK_PCOM("sdc_clk",	SDC3_CLK,	&msm_device_sdc3.dev, OFF),
+	CLK_PCOM("sdc_pclk",	SDC3_P_CLK,	&msm_device_sdc3.dev, OFF),
+	CLK_PCOM("sdc_clk",	SDC4_CLK,	&msm_device_sdc4.dev, OFF),
+	CLK_PCOM("sdc_pclk",	SDC4_P_CLK,	&msm_device_sdc4.dev, OFF),
+	CLK_PCOM("spi_clk",	SPI_CLK,	NULL, 0),
+	CLK_PCOM("spi_pclk",	SPI_P_CLK,	NULL, OFF),
+	CLK_7X30S("tv_src_clk",	TV_CLK, 	TV_ENC_CLK,	NULL, 0),
+	CLK_PCOM("tv_dac_clk",	TV_DAC_CLK,	NULL, 0),
+	CLK_PCOM("tv_enc_clk",	TV_ENC_CLK,	NULL, 0),
+	CLK_PCOM("uart_clk",	UART1_CLK,	&msm_device_uart1.dev, OFF),
+	CLK_PCOM("uart_clk",	UART2_CLK,	&msm_device_uart2.dev, 0),
+	CLK_PCOM("uart_clk",	UART3_CLK,	&msm_device_uart3.dev, OFF),
+	CLK_PCOM("uartdm_clk",	UART1DM_CLK,	&msm_device_uart_dm1.dev, OFF),
+	CLK_PCOM("uartdm_clk",	UART2DM_CLK,	&msm_device_uart_dm2.dev, 0),
+	CLK_PCOM("usb_hs_clk",		USB_HS_CLK,		NULL, OFF),
+	CLK_PCOM("usb_hs_pclk",		USB_HS_P_CLK,		NULL, OFF),
+	/* Now we can't close these usb clocks at the beginning change OFF to 0 temporarily */
+	CLK_PCOM("usb_hs_core_clk",	USB_HS_CORE_CLK,	NULL, 0),
+	CLK_PCOM("usb_hs2_clk",		USB_HS2_CLK,		NULL, 0),
+	CLK_PCOM("usb_hs2_pclk",	USB_HS2_P_CLK,		NULL, 0),
+	CLK_PCOM("usb_hs2_core_clk",	USB_HS2_CORE_CLK,	NULL, 0),
+	CLK_PCOM("usb_hs3_clk",		USB_HS3_CLK,		NULL, 0),
+	CLK_PCOM("usb_hs3_pclk",	USB_HS3_P_CLK,		NULL, 0),
+	CLK_PCOM("usb_hs3_core_clk",	USB_HS3_CORE_CLK,	NULL, 0),
+	CLK_PCOM("vdc_clk",	VDC_CLK,	NULL, OFF | MINMAX),
+	CLK_PCOM("vfe_camif_clk",	VFE_CAMIF_CLK, 	NULL, OFF),
+	CLK_PCOM("vfe_clk",	VFE_CLK,	NULL, 0),
+	CLK_PCOM("vfe_mdc_clk",	VFE_MDC_CLK,	NULL, OFF),
+	CLK_PCOM("vfe_pclk",	VFE_P_CLK,	NULL, OFF),
+	CLK_PCOM("vpe_clk",	VPE_CLK,	NULL, 0),
+
+	/* 7x30 v2 hardware only. */
+	CLK_PCOM("csi_clk",	CSI0_CLK,	NULL, 0),
+	CLK_PCOM("csi_pclk",	CSI0_P_CLK,	NULL, 0),
+	CLK_PCOM("csi_vfe_clk",	CSI0_VFE_CLK,	NULL, 0),
+
+	CLOCK(NULL, 0, NULL, 0, 0),
+#endif
 };
 
 static int mfg_mode;
@@ -1132,18 +1525,20 @@ static int __init board_serialno_setup(char *serialno)
 #ifdef CONFIG_USB_FUNCTION
 	msm_hsusb_pdata.serial_number = str;
 #endif
-#ifdef CONFIG_USB_ANDROID
-	android_usb_pdata.serial_number = str;
-#endif
+	board_sn = str;
 	return 1;
 }
 __setup("androidboot.serialno=", board_serialno_setup);
 
+char *board_serialno(void)
+{
+	return board_sn;
+}
 
 #define ATAG_SKUID 0x4d534D73
-unsigned __init parse_tag_skuid(const struct tag *tags)
+int __init parse_tag_skuid(const struct tag *tags)
 {
-	unsigned skuid = 0, find = 0;
+	int skuid = 0, find = 0;
 	struct tag *t = (struct tag *)tags;
 
 	for (; t->hdr.size; t = tag_next(t)) {
@@ -1190,10 +1585,50 @@ int __init parse_tag_engineerid(const struct tag *tags)
 	}
 
 	if (find) {
+		engineer_id = t->u.revision.rev;
 		engineerid = t->u.revision.rev;
-		engineer_id = engineerid;
 	}
 	printk(KERN_DEBUG "parse_tag_engineerid: 0x%x\n", engineerid);
 	return engineerid;
 }
 __tagtable(ATAG_ENGINEERID, parse_tag_engineerid);
+
+#define ATAG_MFG_GPIO_TABLE 0x59504551
+int __init parse_tag_mfg_gpio_table(const struct tag *tags)
+{
+       unsigned char *dptr = (unsigned char *)(&tags->u);
+       __u32 size;
+
+       size = min((__u32)(tags->hdr.size - 2) * sizeof(__u32), (__u32)MFG_GPIO_TABLE_MAX_SIZE);
+       memcpy(mfg_gpio_table, dptr, size);
+       return 0;
+}
+__tagtable(ATAG_MFG_GPIO_TABLE, parse_tag_mfg_gpio_table);
+
+char * board_get_mfg_sleep_gpio_table(void)
+{
+        return mfg_gpio_table;
+}
+EXPORT_SYMBOL(board_get_mfg_sleep_gpio_table);
+
+static char *emmc_tag;
+static int __init board_set_emmc_tag(char *get_hboot_emmc)
+{
+	if (strlen(get_hboot_emmc))
+		emmc_tag = get_hboot_emmc;
+	else
+		emmc_tag = NULL;
+	return 1;
+}
+__setup("androidboot.emmc=", board_set_emmc_tag);
+
+int board_emmc_boot(void)
+{
+	if (emmc_tag) {
+		if (!strcmp(emmc_tag, "true"))
+			return 1;
+	}
+
+	return 0;
+}
+

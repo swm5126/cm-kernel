@@ -158,7 +158,6 @@ enum {
 
 };
 
-#if 0 /* The definition is already in arch/arm/mach-msm/include/mach/pmic.h */
 /* List of VREGs that support the Pull Down Resistor setting. */
 enum vreg_pdown_id {
 	PM_VREG_PDOWN_MSMA_ID,
@@ -216,7 +215,6 @@ enum vreg_pdown_id {
 	PM_VREG_PDOWN_RFA2_ID = PM_VREG_PDOWN_RFTX2_ID,
 	PM_VREG_PDOWN_XO_ID = PM_VREG_PDOWN_TCXO_ID
 };
-#endif
 
 enum {
         PCOM_CLKRGM_APPS_RESET_USB_PHY  = 34,

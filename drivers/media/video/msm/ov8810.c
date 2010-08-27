@@ -87,6 +87,9 @@
 #define OV8810_HRZ_QTR_BLK_PIXELS	890
 #define OV8810_VER_QTR_BLK_LINES	44
 
+static int cam_mode_sel = 0; /* 0: photo, 1: video@30fps, 2: video@24fps */
+/* 240: 26, 365: 24, 589: 21 */
+const int ov8810_ver_qtr_blk_lines_array[] = {44, 44, 365};
 
 /*=============================================================
 	SENSOR REGISTER DEFINES
@@ -174,8 +177,8 @@
 #define OV8810_AF_MSB			0x30EC
 #define OV8810_AF_LSB			0x30ED
 
-#define OV8810_STEPS_NEAR_TO_CLOSEST_INF	39 /*43 stella0122 */
-#define OV8810_TOTAL_STEPS_NEAR_TO_FAR		39 /*43 stella0122 */
+#define OV8810_STEPS_NEAR_TO_CLOSEST_INF	42 /*43 stella0122 */
+#define OV8810_TOTAL_STEPS_NEAR_TO_FAR		42 /*43 stella0122 */
 
 /*Test pattern*/
 /* Color bar pattern selection */
@@ -225,6 +228,7 @@ int global_mode;
 /*TODO: should be use a header file to reference this function*/
 extern unsigned char *get_cam_awb_cal(void);
 
+static int sensor_probe_node = 0;
 
 static struct wake_lock ov8810_wake_lock;
 
@@ -259,8 +263,13 @@ static struct reg_addr_val_pair_struct ov8810_init_settings_array[] =
 	/* Sensor clk setup */
 	{REG_OP_CLK_DIV, 0x04},
 	{REG_VT_CLK_DIV, 0x05},
+#if 1   /* weiting0414 prevent capture hang restore CLK */
 	{REG_PLL_MULTIPLIER, 0x28}, /*0x28 96MHz PCLK 0x18 64MHz PCLK*/
 	{REG_PRE_PLL_CLK_DIV, 0x22},
+#else
+        {REG_PLL_MULTIPLIER, 0x14}, /*Reduce internal clock to prevent hang Weiting0331*/
+        {REG_PRE_PLL_CLK_DIV, 0x21},
+#endif
 	{OV8810_GAIN, 8}, /*0x30},*/
 	{OV8810_AEC_MSB, 0x04},
 	{OV8810_AEC_LSB, 0xc4}, /*stella 1203*/
@@ -383,157 +392,157 @@ static struct reg_addr_val_pair_struct ov8810_init_settings_array[] =
 	{0x30e1, 0x90},
 	{0x3058, 0x01},
 	{0x3500, 0x40}, /* vsync_new */
-	{REG_BINNING_CONTROL, 0xc0}, /*stella 0126*/
+	{REG_BINNING_CONTROL, 0x00}, /*stella 0126*/
 	/*stella 1203 end*/
 };
 
 /*Vincent for LSC calibration*/
 static struct reg_addr_val_pair_struct lsc_table_array[] =
 {
-	{0x3358, 0x18},
-	{0x3359, 0x0f},
-	{0x335a, 0x0c},
-	{0x335b, 0x0a},
-	{0x335c, 0x0a},
-	{0x335d, 0x0b},
-	{0x335e, 0x0d},
-	{0x335f, 0x15},
-	{0x3360, 0x0b},
-	{0x3361, 0x09},
-	{0x3362, 0x06},
-	{0x3363, 0x05},
-	{0x3364, 0x05},
-	{0x3365, 0x06},
-	{0x3366, 0x08},
-	{0x3367, 0x0b},
-	{0x3368, 0x07},
-	{0x3369, 0x05},
-	{0x336a, 0x03},
-	{0x336b, 0x02},
-	{0x336c, 0x02},
-	{0x336d, 0x03},
-	{0x336e, 0x04},
-	{0x336f, 0x06},
-	{0x3370, 0x05},
-	{0x3371, 0x04},
-	{0x3372, 0x01},
-	{0x3373, 0x00},
-	{0x3374, 0x00},
-	{0x3375, 0x01},
-	{0x3376, 0x03},
-	{0x3377, 0x05},
-	{0x3378, 0x05},
-	{0x3379, 0x03},
-	{0x337a, 0x01},
-	{0x337b, 0x00},
-	{0x337c, 0x00},
-	{0x337d, 0x00},
-	{0x337e, 0x02},
-	{0x337f, 0x05},
-	{0x3380, 0x06},
-	{0x3381, 0x04},
-	{0x3382, 0x03},
-	{0x3383, 0x02},
-	{0x3384, 0x01},
-	{0x3385, 0x02},
-	{0x3386, 0x03},
-	{0x3387, 0x05},
-	{0x3388, 0x0a},
-	{0x3389, 0x07},
-	{0x338a, 0x05},
-	{0x338b, 0x04},
-	{0x338c, 0x04},
-	{0x338d, 0x05},
-	{0x338e, 0x06},
-	{0x338f, 0x09},
-	{0x3390, 0x12},
-	{0x3391, 0x0d},
-	{0x3392, 0x09},
-	{0x3393, 0x08},
-	{0x3394, 0x08},
-	{0x3395, 0x09},
-	{0x3396, 0x0c},
-	{0x3397, 0x11},
-	{0x3398, 0x10},
-	{0x3399, 0x10},
-	{0x339a, 0x10},
-	{0x339b, 0x0e},
-	{0x339c, 0x0e},
-	{0x339d, 0x0f},
-	{0x339e, 0x0e},
-	{0x339f, 0x0f},
-	{0x33a0, 0x0f},
-	{0x33a1, 0x0f},
-	{0x33a2, 0x0f},
-	{0x33a3, 0x10},
-	{0x33a4, 0x0e},
-	{0x33a5, 0x10},
-	{0x33a6, 0x11},
-	{0x33a7, 0x10},
-	{0x33a8, 0x10},
-	{0x33a9, 0x0f},
-	{0x33aa, 0x0e},
-	{0x33ab, 0x0f},
-	{0x33ac, 0x10},
-	{0x33ad, 0x10},
-	{0x33ae, 0x10},
-	{0x33af, 0x0f},
-	{0x33b0, 0x0e},
-	{0x33b1, 0x0f},
-	{0x33b2, 0x0f},
-	{0x33b3, 0x0f},
-	{0x33b4, 0x0f},
-	{0x33b5, 0x0f},
-	{0x33b6, 0x0e},
-	{0x33b7, 0x0d},
-	{0x33b8, 0x0c},
-	{0x33b9, 0x0c},
-	{0x33ba, 0x0d},
-	{0x33bb, 0x0f},
-	{0x33bc, 0x16},
-	{0x33bd, 0x17},
-	{0x33be, 0x17},
-	{0x33bf, 0x17},
-	{0x33c0, 0x17},
-	{0x33c1, 0x14},
-	{0x33c2, 0x17},
-	{0x33c3, 0x14},
-	{0x33c4, 0x13},
-	{0x33c5, 0x13},
-	{0x33c6, 0x14},
-	{0x33c7, 0x15},
-	{0x33c8, 0x15},
-	{0x33c9, 0x12},
-	{0x33ca, 0x10},
-	{0x33cb, 0x10},
-	{0x33cc, 0x12},
-	{0x33cd, 0x14},
-	{0x33ce, 0x15},
-	{0x33cf, 0x12},
-	{0x33d0, 0x10},
-	{0x33d1, 0x10},
-	{0x33d2, 0x12},
-	{0x33d3, 0x14},
-	{0x33d4, 0x16},
-	{0x33d5, 0x13},
-	{0x33d6, 0x12},
-	{0x33d7, 0x12},
-	{0x33d8, 0x13},
-	{0x33d9, 0x15},
-	{0x33da, 0x18},
-	{0x33db, 0x15},
-	{0x33dc, 0x15},
-	{0x33dd, 0x15},
-	{0x33de, 0x15},
-	{0x33df, 0x14},
-	{0x3350, 0x06},
-	{0x3351, 0xab},
-	{0x3352, 0x05},
-	{0x3353, 0x00},
-	{0x3354, 0x04},
-	{0x3355, 0xf8},
-	{0x3356, 0x07},
-	{0x3357, 0x74},
+	{0x3358, 0x1f  },//{0x3358, 0x18},
+	{0x3359, 0x14  },//{0x3359, 0x0f},
+	{0x335a, 0x0f  },//{0x335a, 0x0c},
+	{0x335b, 0x0d  },//{0x335b, 0x0a},
+	{0x335c, 0x0d  },//{0x335c, 0x0a},
+	{0x335d, 0x0f  },//{0x335d, 0x0b},
+	{0x335e, 0x14  },//{0x335e, 0x0d},
+	{0x335f, 0x1d  },//{0x335f, 0x15},
+	{0x3360, 0x0f  },//{0x3360, 0x0b},
+	{0x3361, 0x0a  },//{0x3361, 0x09},
+	{0x3362, 0x07  },//{0x3362, 0x06},
+	{0x3363, 0x06  },//{0x3363, 0x05},
+	{0x3364, 0x06  },//{0x3364, 0x05},
+	{0x3365, 0x07  },//{0x3365, 0x06},
+	{0x3366, 0x09  },//{0x3366, 0x08},
+	{0x3367, 0x0d  },//{0x3367, 0x0b},
+	{0x3368, 0x09  },//{0x3368, 0x07},
+	{0x3369, 0x06  },//{0x3369, 0x05},
+	{0x336a, 0x04  },//{0x336a, 0x03},
+	{0x336b, 0x03  },//{0x336b, 0x02},
+	{0x336c, 0x03  },//{0x336c, 0x02},
+	{0x336d, 0x04  },//{0x336d, 0x03},
+	{0x336e, 0x06  },//{0x336e, 0x04},
+	{0x336f, 0x09  },//{0x336f, 0x06},
+	{0x3370, 0x07  },//{0x3370, 0x05},
+	{0x3371, 0x04  },//{0x3371, 0x04},
+	{0x3372, 0x01  },//{0x3372, 0x01},
+	{0x3373, 0x00  },//{0x3373, 0x00},
+	{0x3374, 0x00  },//{0x3374, 0x00},
+	{0x3375, 0x01  },//{0x3375, 0x01},
+	{0x3376, 0x04  },//{0x3376, 0x03},
+	{0x3377, 0x07  },//{0x3377, 0x05},
+	{0x3378, 0x08  },//{0x3378, 0x05},
+	{0x3379, 0x04  },//{0x3379, 0x03},
+	{0x337a, 0x01  },//{0x337a, 0x01},
+	{0x337b, 0x00  },//{0x337b, 0x00},
+	{0x337c, 0x00  },//{0x337c, 0x00},
+	{0x337d, 0x01  },//{0x337d, 0x00},
+	{0x337e, 0x04  },//{0x337e, 0x02},
+	{0x337f, 0x07  },//{0x337f, 0x05},
+	{0x3380, 0x09  },//{0x3380, 0x06},
+	{0x3381, 0x06  },//{0x3381, 0x04},
+	{0x3382, 0x04  },//{0x3382, 0x03},
+	{0x3383, 0x02  },//{0x3383, 0x02},
+	{0x3384, 0x02  },//{0x3384, 0x01},
+	{0x3385, 0x04  },//{0x3385, 0x02},
+	{0x3386, 0x06  },//{0x3386, 0x03},
+	{0x3387, 0x09  },//{0x3387, 0x05},
+	{0x3388, 0x0f  },//{0x3388, 0x0a},
+	{0x3389, 0x0a  },//{0x3389, 0x07},
+	{0x338a, 0x07  },//{0x338a, 0x05},
+	{0x338b, 0x07  },//{0x338b, 0x04},
+	{0x338c, 0x07  },//{0x338c, 0x04},
+	{0x338d, 0x07  },//{0x338d, 0x05},
+	{0x338e, 0x0a  },//{0x338e, 0x06},
+	{0x338f, 0x0f  },//{0x338f, 0x09},
+	{0x3390, 0x1d  },//{0x3390, 0x12},
+	{0x3391, 0x12  },//{0x3391, 0x0d},
+	{0x3392, 0x0d  },//{0x3392, 0x09},
+	{0x3393, 0x0b  },//{0x3393, 0x08},
+	{0x3394, 0x0b  },//{0x3394, 0x08},
+	{0x3395, 0x0d  },//{0x3395, 0x09},
+	{0x3396, 0x12  },//{0x3396, 0x0c},
+	{0x3397, 0x1a  },//{0x3397, 0x11},
+	{0x3398, 0x0f  },//{0x3398, 0x10},
+	{0x3399, 0x0d  },//{0x3399, 0x10},
+	{0x339a, 0x0e  },//{0x339a, 0x10},
+	{0x339b, 0x0f  },//{0x339b, 0x0e},
+	{0x339c, 0x11  },//{0x339c, 0x0e},
+	{0x339d, 0x0d  },//{0x339d, 0x0f},
+	{0x339e, 0x12  },//{0x339e, 0x0e},
+	{0x339f, 0x0e  },//{0x339f, 0x0f},
+	{0x33a0, 0x0f  },//{0x33a0, 0x0f},
+	{0x33a1, 0x0f  },//{0x33a1, 0x0f},
+	{0x33a2, 0x10  },//{0x33a2, 0x0f},
+	{0x33a3, 0x10  },//{0x33a3, 0x10},
+	{0x33a4, 0x0f  },//{0x33a4, 0x0e},
+	{0x33a5, 0x0d  },//{0x33a5, 0x10},
+	{0x33a6, 0x0f  },//{0x33a6, 0x11},
+	{0x33a7, 0x10  },//{0x33a7, 0x10},
+	{0x33a8, 0x10  },//{0x33a8, 0x10},
+	{0x33a9, 0x0f  },//{0x33a9, 0x0f},
+	{0x33aa, 0x10  },//{0x33aa, 0x0e},
+	{0x33ab, 0x0e  },//{0x33ab, 0x0f},
+	{0x33ac, 0x10  },//{0x33ac, 0x10},
+	{0x33ad, 0x11  },//{0x33ad, 0x10},
+	{0x33ae, 0x11  },//{0x33ae, 0x10},
+	{0x33af, 0x0f  },//{0x33af, 0x0f},
+	{0x33b0, 0x0f  },//{0x33b0, 0x0e},
+	{0x33b1, 0x0d  },//{0x33b1, 0x0f},
+	{0x33b2, 0x0d  },//{0x33b2, 0x0f},
+	{0x33b3, 0x0e  },//{0x33b3, 0x0f},
+	{0x33b4, 0x0f  },//{0x33b4, 0x0f},
+	{0x33b5, 0x10  },//{0x33b5, 0x0f},
+	{0x33b6, 0x12  },//{0x33b6, 0x0e},
+	{0x33b7, 0x0d  },//{0x33b7, 0x0d},
+	{0x33b8, 0x0c  },//{0x33b8, 0x0c},
+	{0x33b9, 0x0c  },//{0x33b9, 0x0c},
+	{0x33ba, 0x0c  },//{0x33ba, 0x0d},
+	{0x33bb, 0x0b  },//{0x33bb, 0x0f},
+	{0x33bc, 0x1b  },//{0x33bc, 0x16},
+	{0x33bd, 0x1b  },//{0x33bd, 0x17},
+	{0x33be, 0x1d  },//{0x33be, 0x17},
+	{0x33bf, 0x1d  },//{0x33bf, 0x17},
+	{0x33c0, 0x1e  },//{0x33c0, 0x17},
+	{0x33c1, 0x1c  },//{0x33c1, 0x14},
+	{0x33c2, 0x1a  },//{0x33c2, 0x17},
+	{0x33c3, 0x17  },//{0x33c3, 0x14},
+	{0x33c4, 0x15  },//{0x33c4, 0x13},
+	{0x33c5, 0x16  },//{0x33c5, 0x13},
+	{0x33c6, 0x19  },//{0x33c6, 0x14},
+	{0x33c7, 0x1e  },//{0x33c7, 0x15},
+	{0x33c8, 0x16  },//{0x33c8, 0x15},
+	{0x33c9, 0x12  },//{0x33c9, 0x12},
+	{0x33ca, 0x10  },//{0x33ca, 0x10},
+	{0x33cb, 0x10  },//{0x33cb, 0x10},
+	{0x33cc, 0x14  },//{0x33cc, 0x12},
+	{0x33cd, 0x19  },//{0x33cd, 0x14},
+	{0x33ce, 0x16  },//{0x33ce, 0x15},
+	{0x33cf, 0x12  },//{0x33cf, 0x12},
+	{0x33d0, 0x10  },//{0x33d0, 0x10},
+	{0x33d1, 0x11  },//{0x33d1, 0x10},
+	{0x33d2, 0x14  },//{0x33d2, 0x12},
+	{0x33d3, 0x1a  },//{0x33d3, 0x14},
+	{0x33d4, 0x18  },//{0x33d4, 0x16},
+	{0x33d5, 0x15  },//{0x33d5, 0x13},
+	{0x33d6, 0x13  },//{0x33d6, 0x12},
+	{0x33d7, 0x14  },//{0x33d7, 0x12},
+	{0x33d8, 0x17  },//{0x33d8, 0x13},
+	{0x33d9, 0x1b  },//{0x33d9, 0x15},
+	{0x33da, 0x18  },//{0x33da, 0x18},
+	{0x33db, 0x1a  },//{0x33db, 0x15},
+	{0x33dc, 0x1b  },//{0x33dc, 0x15},
+	{0x33dd, 0x1b  },//{0x33dd, 0x15},
+	{0x33de, 0x1b  },//{0x33de, 0x15},
+	{0x33df, 0x1c  },//{0x33df, 0x14},
+	{0x3350, 0x06  },//{0x3350, 0x06},
+	{0x3351, 0xab  },//{0x3351, 0xab},
+	{0x3352, 0x05  },//{0x3352, 0x05},
+	{0x3353, 0x00  },//{0x3353, 0x00},
+	{0x3354, 0x04  },//{0x3354, 0x04},
+	{0x3355, 0xf8  },//{0x3355, 0xf8},
+	{0x3356, 0x07  },//{0x3356, 0x07},
+	{0x3357, 0x74  },//{0x3357, 0x74},
 	/* lsc setting on sensor*/
 	{0x3300, 0xff}, /*enable lsc on sensor*/
 	/*move to the last*/
@@ -569,7 +578,7 @@ static struct reg_addr_val_pair_struct ov8810_qtr_settings_array[] =
 	{0x307e, 0x00},
 	{0x3071, 0x40},/*50 BLC trigger by gain 40 BLC every frame */
 	{REG_ISP_ENABLE_CONTROL_01, 0x0B},
-	{REG_BINNING_CONTROL, 0xc0}, //stella0127
+	{REG_BINNING_CONTROL, 0x00}, //stella0127
 	{0x331c, 0x00},
 	{0x331d, 0x00},
 	{0x308a, 0x02},
@@ -845,6 +854,12 @@ static int ov8810_update_lsc_table(struct sensor_cfg_data *cdata)
 
 }
 
+/*20100330 vincent for LSC calibration*/
+static int ov8810_LSC_calibration_set_rawflag(struct sensor_cfg_data *cdata)
+{
+	global_mode = 1;
+	return 1;
+}
 
 #define MAX_FUSE_ID_INFO 11
 static int ov8810_i2c_read_fuseid(struct sensor_cfg_data *cdata)
@@ -1052,7 +1067,7 @@ static void ov8810_get_pict_fps(uint16_t fps, uint16_t *pfps)
 		preview_width =
 			OV8810_QTR_SIZE_WIDTH  + OV8810_HRZ_QTR_BLK_PIXELS ;
 		preview_height =
-			OV8810_QTR_SIZE_HEIGHT + OV8810_VER_QTR_BLK_LINES ;
+			OV8810_QTR_SIZE_HEIGHT + ov8810_ver_qtr_blk_lines_array[cam_mode_sel] ;
 	} else {
 		/* full size resolution used for preview. */
 		preview_width =
@@ -1065,7 +1080,8 @@ static void ov8810_get_pict_fps(uint16_t fps, uint16_t *pfps)
 		snapshot_width =
 			OV8810_QTR_SIZE_WIDTH + OV8810_HRZ_QTR_BLK_PIXELS ;
 		snapshot_height =
-			OV8810_QTR_SIZE_HEIGHT + OV8810_VER_QTR_BLK_LINES ;
+			OV8810_QTR_SIZE_HEIGHT + ov8810_ver_qtr_blk_lines_array[cam_mode_sel] ;
+
 	} else {
 		snapshot_width =
 			OV8810_FULL_SIZE_WIDTH + OV8810_HRZ_FULL_BLK_PIXELS;
@@ -1084,7 +1100,7 @@ static void ov8810_get_pict_fps(uint16_t fps, uint16_t *pfps)
 static uint16_t ov8810_get_prev_lines_pf(void)
 {
 	if (ov8810_ctrl->prev_res == QTR_SIZE) {
-		return (OV8810_QTR_SIZE_HEIGHT + OV8810_VER_QTR_BLK_LINES);
+		return (OV8810_QTR_SIZE_HEIGHT + ov8810_ver_qtr_blk_lines_array[cam_mode_sel]);
 	} else  {
 		return (OV8810_FULL_SIZE_HEIGHT + OV8810_VER_FULL_BLK_LINES);
 	}
@@ -1102,7 +1118,7 @@ static uint16_t ov8810_get_prev_pixels_pl(void)
 static uint16_t ov8810_get_pict_lines_pf(void)
 {
 	if (ov8810_ctrl->pict_res == QTR_SIZE) {
-		return (OV8810_QTR_SIZE_HEIGHT + OV8810_VER_QTR_BLK_LINES);
+		return (OV8810_QTR_SIZE_HEIGHT + ov8810_ver_qtr_blk_lines_array[cam_mode_sel]);
 	} else  {
 		return (OV8810_FULL_SIZE_HEIGHT + OV8810_VER_FULL_BLK_LINES);
 	}
@@ -1120,7 +1136,7 @@ static uint16_t ov8810_get_pict_pixels_pl(void)
 static uint32_t ov8810_get_pict_max_exp_lc(void)
 {
 	if (ov8810_ctrl->pict_res == QTR_SIZE) {
-		return (OV8810_QTR_SIZE_HEIGHT + OV8810_VER_QTR_BLK_LINES);
+		return (OV8810_QTR_SIZE_HEIGHT + ov8810_ver_qtr_blk_lines_array[cam_mode_sel]);
 	} else  {
 		return (OV8810_FULL_SIZE_HEIGHT + OV8810_VER_FULL_BLK_LINES);
 	}
@@ -1163,7 +1179,7 @@ static int32_t ov8810_write_exp_gain
 
 	if (ov8810_ctrl->curr_res == QTR_SIZE) {
 		total_lines_per_frame =
-			(OV8810_QTR_SIZE_HEIGHT + OV8810_VER_QTR_BLK_LINES);
+			(OV8810_QTR_SIZE_HEIGHT + ov8810_ver_qtr_blk_lines_array[cam_mode_sel]);
 		total_pixels_per_line =
 			OV8810_QTR_SIZE_WIDTH + OV8810_HRZ_QTR_BLK_PIXELS;
 	} else {
@@ -1282,10 +1298,20 @@ static int32_t ov8810_write_exp_gain
 	if (!do_write)
 		return rc;
 
+/*Move the read function out of group update to prevent hang Weiting0331*/
+	rc = ov8810_i2c_read(OV8810_REG_MUL_GAIN,
+		&ori_reg_mul_gain, 2);
+	if (rc < 0) {
+		pr_err("read OV8810_REG_MUL_GAIN fail\n");
+		return rc;
+	}
+
+
 	/* since we do STREAM ON here, don't do group update for snapshot */
 	if (ov8810_ctrl->sensormode != SENSOR_SNAPSHOT_MODE) {
 		/*for group update top*/
-		rc = ov8810_i2c_write_b(ov8810_client->addr, 0x30b7, 0x88);
+		/* weiting0414 prevent capture hang, enable 0x30b7[2] */
+		rc = ov8810_i2c_write_b(ov8810_client->addr, 0x30b7, 0x8c);
 		if (rc < 0)
 			return rc;
 	}
@@ -1305,12 +1331,6 @@ static int32_t ov8810_write_exp_gain
 	if (rc < 0)
 		return rc;
 
-	rc = ov8810_i2c_read(OV8810_REG_MUL_GAIN,
-		&ori_reg_mul_gain, 2);
-	if (rc < 0) {
-		pr_err("read OV8810_REG_MUL_GAIN fail\n");
-		return rc;
-	}
 	ori_reg_mul_gain_8bit =
 		(uint8_t)((ori_reg_mul_gain & 0xFF00) >> 8);
 	CDBG("%s, read OV8810_REG_MUL_GAIN ori_reg_mul_gain = %x\n",
@@ -1341,11 +1361,17 @@ static int32_t ov8810_write_exp_gain
 
 	if (ov8810_ctrl->sensormode != SENSOR_SNAPSHOT_MODE) {
 		/* for group update bottom */
-		rc = ov8810_i2c_write_b(ov8810_client->addr, 0x30b7, 0x80);
+		/* weiting0414 prevent capture hang , enable 0x30b7[2] */
+		rc = ov8810_i2c_write_b(ov8810_client->addr, 0x30b7, 0x84);
 		if (rc < 0)
 			return rc;
 
 		/* for group update enable */
+		rc = ov8810_i2c_write_b(ov8810_client->addr, 0x30ff, 0xff);
+		if (rc < 0)
+			return rc;
+		/* weiting0414 prevent capture hang ,
+			retry I2C write to make sure enable */
 		rc = ov8810_i2c_write_b(ov8810_client->addr, 0x30ff, 0xff);
 		if (rc < 0)
 			return rc;
@@ -1597,7 +1623,34 @@ static int32_t ov8810_setting(int rt)
 	uint16_t ori_reg_mul_gain;
 	uint8_t ori_reg_mul_gain_8bit;
 
+	uint16_t i2c_ret = 0;
+
 	write_cnt = 0;
+
+	pr_info("ov8810_setting rt = %d\n", rt);
+
+	if (rt == FULL_SIZE) {
+
+		ov8810_i2c_read(0x30b7, &i2c_ret, 1);
+		pr_info("0x30b7, i2c_ret = 0x%X\n", i2c_ret);
+    /*Retry writing group update bottom to ensure capture settings can be updated Weiting0331*/
+		while (i2c_ret != 0x84) {
+
+		/* for group update bottom */
+		rc = ov8810_i2c_write_b(ov8810_client->addr, 0x30b7, 0x84);
+		if (rc < 0)
+			return rc;
+
+		/* for group update enable */
+		rc = ov8810_i2c_write_b(ov8810_client->addr, 0x30ff, 0xff);
+		if (rc < 0)
+			return rc;
+
+		msleep(50);
+		ov8810_i2c_read(0x30b7, &i2c_ret, 1);
+		pr_info("retry 0x30b7, i2c_ret = 0x%X\n", i2c_ret);
+		};
+	}
 
 	rc = ov8810_i2c_write_b(ov8810_client->addr,
 		OV8810_REG_MODE_SELECT,
@@ -1605,6 +1658,9 @@ static int32_t ov8810_setting(int rt)
 	if (rc < 0) {
 		return rc;
 	}
+
+	ov8810_i2c_read(OV8810_REG_MODE_SELECT, &i2c_ret, 1);
+	pr_info("OV8810_REG_MODE_SELECT, i2c_ret = 0x%X\n", i2c_ret);
 
 	switch (rt) {
 
@@ -1623,6 +1679,34 @@ static int32_t ov8810_setting(int rt)
 				return rc;
 			}
 		}
+
+/* reconfigure the qtr height to adjust frame rate */
+{
+		uint16_t fl_line = 0;
+		fl_line = OV8810_QTR_SIZE_HEIGHT +
+			ov8810_ver_qtr_blk_lines_array[cam_mode_sel];
+		rc = ov8810_i2c_write_b(ov8810_client->addr,
+			REG_FRAME_LENGTH_LINES_MSB,
+			(fl_line & 0xFF00) >> 8);
+		if (rc < 0)
+			return rc;
+		rc = ov8810_i2c_write_b(ov8810_client->addr,
+			REG_FRAME_LENGTH_LINES_LSB,
+			fl_line & 0x00FF);
+		if (rc < 0)
+			return rc;
+#if 0
+		if (cam_mode_sel > 0)  {
+		pr_info("andy write binning ctrl 0x00, cam_mode_sel %d\n", cam_mode_sel);
+		    rc = ov8810_i2c_write_b(ov8810_client->addr, //weiting ori c0
+			   REG_BINNING_CONTROL, 0x00);
+		if (rc < 0)
+			return rc;
+
+		}
+#endif
+}
+
 
 #if 1 /* this is supposed to prevent abnormal color when restart preview */
 
@@ -1772,14 +1856,26 @@ static int32_t ov8810_setting(int rt)
 static int32_t ov8810_video_config(int mode)
 {
 	int32_t rc = 0;
+	static int pre_sel = 0;
+	int cur_sel = (cam_mode_sel > 1)?1:0;
+
 	ov8810_ctrl->sensormode = mode;
-	if (ov8810_ctrl->curr_res != ov8810_ctrl->prev_res) {
-		rc = ov8810_setting(ov8810_ctrl->prev_res);
-		if (rc < 0)
-			return rc;
+
+	pr_info("%s cam_mode_sel %d cur_sel %d \n", __func__, cam_mode_sel, cur_sel);
+
+	if (ov8810_ctrl->curr_res != ov8810_ctrl->prev_res
+		|| pre_sel != cur_sel
+		)  {
+	       rc = ov8810_setting(ov8810_ctrl->prev_res);
+	       if (rc < 0)
+	               return rc;
+
 	} else {
-		ov8810_ctrl->curr_res = ov8810_ctrl->prev_res;
+	       ov8810_ctrl->curr_res = ov8810_ctrl->prev_res;
 	}
+
+	pre_sel = cur_sel;
+
 	ov8810_ctrl->sensormode = mode;
 
 	return rc;
@@ -1840,7 +1936,7 @@ static int32_t ov8810_set_sensor_mode(int mode,
 		break;
 
 	case SENSOR_RAW_SNAPSHOT_MODE:
-		global_mode = 1;
+		/*global_mode = 1; //20100330 vincent lsc calibration*/
 		pr_info("KPI PA: start sensor snapshot config: %d\n", __LINE__);
 		sinfo->kpi_sensor_start = ktime_to_ns(ktime_get());
 		rc = ov8810_raw_snapshot_config(mode);
@@ -1898,8 +1994,8 @@ static int ov8810_sensor_open_init(struct msm_camera_sensor_info *data)
 	int i;
 	int32_t  rc = 0;
 	/*stella0122*/
-	uint16_t ov8810_nl_region_boundary = 1; /*3;*/
-	uint16_t ov8810_nl_region_code_per_step = 260; /*101;*/
+	uint16_t ov8810_nl_region_boundary = 5; /*3;*/
+	uint16_t ov8810_nl_region_code_per_step = 35; /*101;*/
 	uint16_t ov8810_l_region_code_per_step = 20; /*18;*/
 	int timeout;
 	pr_info("Calling ov8810_sensor_open_init\n");
@@ -2041,7 +2137,10 @@ static int ov8810_sensor_open_init(struct msm_camera_sensor_info *data)
 init_fail:
 	pr_err("%s: init_fail\n", __func__);
 	vreg_disable(vreg_af_actuator);
-	kfree(ov8810_ctrl);
+	if (ov8810_ctrl) {
+		kfree(ov8810_ctrl);
+		ov8810_ctrl = NULL;
+	}
 init_done:
 	up(&ov8810_sem);
 	pr_info("%s: init_done\n", __func__);
@@ -2247,29 +2346,80 @@ static ssize_t sensor_vendor_show(struct device *dev,
 	return ret;
 }
 
+DEFINE_MUTEX(cam_mode_lock);
+
+static ssize_t sensor_read_cam_mode(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	ssize_t length;
+	mutex_lock(&cam_mode_lock);
+	length = sprintf(buf, "%d\n", cam_mode_sel);
+	mutex_unlock(&cam_mode_lock);
+	return length;
+}
+
+static ssize_t sensor_set_cam_mode(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	uint32_t tmp = 0;
+	mutex_lock(&cam_mode_lock);
+	tmp = buf[0] - 0x30; /* only get the first char */
+	cam_mode_sel = tmp;
+	mutex_unlock(&cam_mode_lock);
+	return count;
+}
+
+static ssize_t sensor_read_node(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	ssize_t length;
+	length = sprintf(buf, "%d\n", sensor_probe_node);
+	return length;
+}
+
 static DEVICE_ATTR(sensor, 0444, sensor_vendor_show, NULL);
+static DEVICE_ATTR(cam_mode, 0644, sensor_read_cam_mode, sensor_set_cam_mode);
+static DEVICE_ATTR(node, 0444, sensor_read_node, NULL);
 
 static struct kobject *android_ov8810;
 
 static int ov8810_sysfs_init(void)
 {
-	int ret ;
+	int ret = 0;
 	pr_info("ov8810:kobject creat and add\n");
 	android_ov8810 = kobject_create_and_add("android_camera", NULL);
 	if (android_ov8810 == NULL) {
-		pr_info("ov8810_sysfs_init: subsystem_register " \
-		"failed\n");
+		pr_info("ov8810_sysfs_init: subsystem_register failed\n");
 		ret = -ENOMEM;
 		return ret ;
 	}
 	pr_info("Ov8810:sysfs_create_file\n");
 	ret = sysfs_create_file(android_ov8810, &dev_attr_sensor.attr);
 	if (ret) {
-		pr_info("ov8810_sysfs_init: sysfs_create_file " \
-		"failed\n");
-		kobject_del(android_ov8810);
+		pr_info("ov8810_sysfs_init: sysfs_create_file failed\n");
+		ret = -EFAULT;
+		goto error;
 	}
-	return 0 ;
+
+	ret = sysfs_create_file(android_ov8810, &dev_attr_cam_mode.attr);
+	if (ret) {
+		pr_info("ov8810_sysfs_init: dev_attr_cam_mode failed\n");
+		ret = -EFAULT;
+		goto error;
+	}
+
+	ret = sysfs_create_file(android_ov8810, &dev_attr_node.attr);
+	if (ret) {
+		pr_info("ov8810_sysfs_init: dev_attr_node failed\n");
+		ret = -EFAULT;
+		goto error;
+	}
+
+	return ret;
+
+error:
+	kobject_del(android_ov8810);
+	return ret;
 }
 
 
@@ -2406,8 +2556,13 @@ int ov8810_sensor_config(void __user *argp)
 			}
 			break;
 
-		case DFG_SET_OV_LSC:
+		case CFG_SET_OV_LSC:
 			rc = ov8810_update_lsc_table(&cdata);
+			break;
+
+		/*20100330 vincent for lsc calibration*/
+		case CFG_SET_OV_LSC_RAW_CAPTURE:
+			rc = ov8810_LSC_calibration_set_rawflag(&cdata);
 			break;
 
 		default:
@@ -2442,8 +2597,10 @@ static int ov8810_sensor_release(void)
 	pr_info("%s, %d\n", __func__, __LINE__);
 
 	msm_camio_probe_off(ov8810_pdev);
-	kfree(ov8810_ctrl);
-	ov8810_ctrl = NULL;
+	if (ov8810_ctrl) {
+		kfree(ov8810_ctrl);
+		ov8810_ctrl = NULL;
+	}
 
 	allow_suspend();
 	pr_info("ov8810_release completed\n");
@@ -2461,6 +2618,9 @@ static int ov8810_sensor_probe(struct msm_camera_sensor_info *info,
 		rc = -ENOTSUPP;
 		goto probe_fail;
 	}
+
+	pr_info("ov8810 s->node %d\n", s->node);
+	sensor_probe_node = s->node;
 	/*switch pclk and mclk between main cam and 2nd cam*/
 	/*only for supersonic*/
 	pr_info("Ov8810: doing clk switch (ov8810)\n");
@@ -2522,9 +2682,44 @@ probe_done:
 
 }
 
+static int ov8810_vreg_enable(struct platform_device *pdev)
+{
+	struct msm_camera_sensor_info *sdata = pdev->dev.platform_data;
+	int rc;
+	pr_info("%s camera vreg on\n", __func__);
+
+	if (sdata->camera_power_on == NULL) {
+		pr_err("sensor platform_data didnt register\n");
+		return -EIO;
+	}
+	rc = sdata->camera_power_on();
+	return rc;
+}
+
+
+static int ov8810_vreg_disable(struct platform_device *pdev)
+{
+	struct msm_camera_sensor_info *sdata = pdev->dev.platform_data;
+	int rc;
+	printk(KERN_INFO "%s camera vreg off\n", __func__);
+	if (sdata->camera_power_off == NULL) {
+		pr_err("sensor platform_data didnt register\n");
+		return -EIO;
+	}
+	rc = sdata->camera_power_off();
+	return rc;
+}
+
+
 static int __ov8810_probe(struct platform_device *pdev)
 {
+	int rc;
+	printk("__ov8810_probe\n");
 	ov8810_pdev = pdev;
+	rc = ov8810_vreg_enable(pdev);
+	if (rc < 0)
+		pr_err("__ov8810_probe fail sensor power on error\n");
+
 	return msm_camera_drv_start(pdev, ov8810_sensor_probe);
 }
 

@@ -25,8 +25,6 @@
 #include <linux/platform_device.h>
 #include <linux/android_pmem.h>
 #include <linux/input.h>
-#include <mach/htc_headset_common.h>
-#include <mach/audio_jack.h>
 #include <linux/akm8973.h>
 #include <linux/bma150.h>
 #include <linux/capella_cm3602.h>
@@ -35,6 +33,9 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/setup.h>
+#include <mach/htc_headset_mgr.h>
+#include <mach/htc_headset_gpio.h>
+#include <mach/htc_headset_microp.h>
 
 #include <mach/board.h>
 #include <mach/board_htc.h>
@@ -43,6 +44,7 @@
 #include <mach/camera.h>
 #include <mach/msm_iomap.h>
 #include <mach/htc_battery.h>
+#include <mach/htc_usb.h>
 #include <mach/perflock.h>
 #include <mach/msm_serial_debugger.h>
 #include <mach/system.h>
@@ -60,7 +62,7 @@
 #include <mach/msm_flashlight.h>
 #include <linux/atmel_qt602240.h>
 #include <mach/vreg.h>
-#include <mach/pmic.h>
+/* #include <mach/pmic.h> */
 #include <mach/msm_hsusb.h>
 
 #define SMEM_SPINLOCK_I2C      6
@@ -75,6 +77,15 @@ extern void __init incrediblec_audio_init(void);
 #ifdef CONFIG_MICROP_COMMON
 void __init incrediblec_microp_init(void);
 #endif
+
+#define SAMSUNG_PANEL		0
+/*Bitwise mask for SONY PANEL ONLY*/
+#define SONY_PANEL		0x1		/*Set bit 0 as 1 when it is SONY PANEL*/
+#define SONY_PWM_SPI		0x2		/*Set bit 1 as 1 as PWM_SPI mode, otherwise it is PWM_MICROP mode*/
+#define SONY_GAMMA		0x4		/*Set bit 2 as 1 when panel contains GAMMA table in its NVM*/
+#define SONY_RGB666		0x8		/*Set bit 3 as 1 when panel is 18 bit, otherwise it is 16 bit*/
+
+extern int panel_type;
 
 unsigned int engineerid;
 
@@ -97,23 +108,6 @@ static struct platform_device htc_battery_pdev = {
 static int capella_cm3602_power(int pwr_device, uint8_t enable);
 /*XA, XB*/
 static struct microp_function_config microp_functions[] = {
-	{
-		.name = "light_sensor",
-		.category = MICROP_FUNCTION_LSENSOR,
-		.levels = { 0, 10, 16, 22, 75, 186, 320, 373, 550, 0x3FF },
-		.channel = 3,
-		.int_pin = 1 << 9,
-		.golden_adc = 0xD2,
-		.mask_w = {0x00, 0x00, 0x04},
-		.ls_power = capella_cm3602_power,
-	},
-	{
-		.name   = "remote-key",
-		.category = MICROP_FUNCTION_REMOTEKEY,
-		.levels = {0, 33, 50, 110, 160, 220},
-		.channel = 1,
-		.int_pin = 1 << 5,
-	},
 	{
 		.name   = "microp_intrrupt",
 		.category = MICROP_FUNCTION_INTR,
@@ -140,16 +134,6 @@ static struct microp_function_config microp_functions[] = {
 /*For XC: Change ALS chip from CM3602 to CM3605*/
 static struct microp_function_config microp_functions_1[] = {
 	{
-		.name = "light_sensor",
-		.category = MICROP_FUNCTION_LSENSOR,
-		.levels = { 0, 11, 16, 22, 75, 209, 362, 488, 560, 0x3FF },
-		.channel = 3,
-		.int_pin = 1 << 9,
-		.golden_adc = 0xD2,
-		.mask_w = {0x00, 0x00, 0x04},
-		.ls_power = capella_cm3602_power,
-	},
-	{
 		.name   = "remote-key",
 		.category = MICROP_FUNCTION_REMOTEKEY,
 		.levels = {0, 33, 50, 110, 160, 220},
@@ -179,24 +163,31 @@ static struct microp_function_config microp_functions_1[] = {
 	},
 };
 
+static struct microp_function_config microp_lightsensor = {
+	.name = "light_sensor",
+	.category = MICROP_FUNCTION_LSENSOR,
+	.levels = { 0, 11, 16, 22, 75, 209, 362, 488, 560, 0x3FF },
+	.channel = 3,
+	.int_pin = 1 << 9,
+	.golden_adc = 0xD2,
+	.mask_w = {0x00, 0x00, 0x04},
+	.ls_power = capella_cm3602_power,
+};
+
 static struct lightsensor_platform_data lightsensor_data = {
-	.config = &microp_functions[0],
+	.config = &microp_lightsensor,
 	.irq = MSM_uP_TO_INT(9),
 };
 
 static struct microp_led_config led_config[] = {
 	{
-		.name   = "amber",
+		.name = "amber",
 		.type = LED_RGB,
 	},
 	{
-		.name   = "green",
+		.name = "green",
 		.type = LED_RGB,
 	},
-/*	{
-		.name   = "vkey-backlight",
-		.type = LED_GPO,
-	},*/
 };
 
 static struct microp_led_platform_data microp_leds_data = {
@@ -208,125 +199,6 @@ static struct bma150_platform_data incrediblec_g_sensor_pdata = {
 	.microp_new_cmd = 1,
 };
 
-static struct platform_device microp_devices[] = {
-	{
-		.name = "lightsensor_microp",
-		.dev = {
-			.platform_data = &lightsensor_data,
-		},
-	},
-	 {
-		.name = "leds-microp",
-		.id = -1,
-		.dev = {
-			.platform_data = &microp_leds_data,
-		},
-	},
-	{
-		.name = BMA150_G_SENSOR_NAME,
-		.dev = {
-			.platform_data = &incrediblec_g_sensor_pdata,
-		},
-	},
-};
-
-static struct microp_i2c_platform_data microp_data = {
-	.num_functions   = ARRAY_SIZE(microp_functions),
-	.microp_function = microp_functions,
-	.num_devices = ARRAY_SIZE(microp_devices),
-	.microp_devices = microp_devices,
-	.gpio_reset = INCREDIBLEC_GPIO_UP_RESET_N,
-	.microp_ls_on = LS_PWR_ON | PS_PWR_ON,
-	.spi_devices = SPI_OJ | SPI_GSENSOR,
-};
-
-static struct gpio_led incrediblec_led_list[] = {
-	{
-		.name = "button-backlight",
-		.gpio = INCREDIBLEC_AP_KEY_LED_EN,
-		.active_low = 0,
-	},
-};
-
-static struct gpio_led_platform_data incrediblec_leds_data = {
-	.num_leds	= ARRAY_SIZE(incrediblec_led_list),
-	.leds		= incrediblec_led_list,
-};
-
-static struct platform_device incrediblec_leds = {
-	.name		= "leds-gpio",
-	.id		= -1,
-	.dev		= {
-		.platform_data	= &incrediblec_leds_data,
-	},
-};
-
-static struct msm_hsusb_product incrediblec_usb_products[] = {
-	{
-		.product_id	= 0x0ff9,
-		.functions	= 0x00000001, /* usb_mass_storage */
-	},
-	{
-		.product_id	= 0x0c9e,
-		.functions	= 0x00000003, /* usb_mass_storage + adb */
-	},
-	{
-		.product_id	= 0x0c03,
-		.functions	= 0x00000101, /* modem + mass_storage */
-	},
-	{
-		.product_id	= 0x0c04,
-		.functions	= 0x00000103, /* modem + adb + mass_storage */
-	},
-	{
-		.product_id	= 0x0c05,
-		.functions	= 0x00000021, /* Projector + mass_storage */
-	},
-	{
-		.product_id	= 0x0c06,
-		.functions	= 0x00000023, /* Projector + adb + mass_storage */
-	},
-	{
-		.product_id	= 0x0c07,
-		.functions	= 0x0000000B, /* diag + adb + mass_storage */
-	},
-	{
-		.product_id	= 0x0c08,
-		.functions	= 0x00000009, /* diag + mass_storage */
-	},
-	{
-		.product_id	= 0x0c88,
-		.functions	= 0x0000010B, /* adb + mass_storage + diag + modem */
-	},
-	{
-		.product_id	= 0x0c89,
-		.functions	= 0x00000019, /* serial + diag + mass_storage */
-	},
-	{
-		.product_id	= 0x0c8a,
-		.functions	= 0x0000001B, /* serial + diag + adb + mass_storage */
-	},
-	{
-		.product_id	= 0x0c93,
-		.functions	= 0x00000080, /* mtp */
-	},
-	{
-		.product_id	= 0x0FFB,
-		.functions	= 0x00000109, /* ums + diag + modem */
-	},
-	{
-		.product_id	= 0x0FFE,
-		.functions	= 0x00000004, /* internet sharing */
-	},
-};
-static int incrediblec_phy_init_seq[] = { 0x1D, 0x0D, 0x1D, 0x10, -1 };
-extern void msm_hsusb_8x50_phy_reset(void);
-
-static struct platform_device incrediblec_rfkill = {
-	.name = "incrediblec_rfkill",
-	.id = -1,
-};
-
 /* Proximity Sensor (Capella_CM3602)*/
 
 static int __capella_cm3602_power(int on)
@@ -334,6 +206,8 @@ static int __capella_cm3602_power(int on)
 	uint8_t data[3], addr;
 	int ret;
 
+	printk(KERN_DEBUG "%s: Turn the capella_cm3602 power %s\n",
+		__func__, (on) ? "on" : "off");
 	if (on)
 		gpio_direction_output(INCREDIBLEC_GPIO_PROXIMITY_EN_N, 1);
 
@@ -381,17 +255,156 @@ static int capella_cm3602_power(int pwr_device, uint8_t enable)
 static struct capella_cm3602_platform_data capella_cm3602_pdata = {
 	.power = capella_cm3602_power,
 	.p_en = INCREDIBLEC_GPIO_PROXIMITY_EN_N,
-	.p_out = 0,
-};
-
-static struct platform_device capella_cm3602 = {
-	.name = "incrediblec_proximity",
-	.id = -1,
-	.dev = {
-		.platform_data = &capella_cm3602_pdata
-	}
+	.p_out = MSM_uP_TO_INT(11),
 };
 /* End Proximity Sensor (Capella_CM3602)*/
+
+static struct htc_headset_microp_platform_data htc_headset_microp_data = {
+	.remote_int		= 1 << 5,
+	.remote_irq		= MSM_uP_TO_INT(5),
+	.remote_enable_pin	= NULL,
+	.adc_channel		= 0x01,
+	.adc_remote		= {0, 33, 50, 110, 160, 220},
+};
+
+static struct platform_device microp_devices[] = {
+	{
+		.name = "lightsensor_microp",
+		.dev = {
+			.platform_data = &lightsensor_data,
+		},
+	},
+	 {
+		.name = "leds-microp",
+		.id = -1,
+		.dev = {
+			.platform_data = &microp_leds_data,
+		},
+	},
+	{
+		.name = BMA150_G_SENSOR_NAME,
+		.dev = {
+			.platform_data = &incrediblec_g_sensor_pdata,
+		},
+	},
+	{
+		.name = "incrediblec_proximity",
+		.id = -1,
+		.dev = {
+			.platform_data = &capella_cm3602_pdata,
+		},
+	},
+	{
+		.name	= "HTC_HEADSET_MICROP",
+		.id	= -1,
+		.dev	= {
+			.platform_data	= &htc_headset_microp_data,
+		},
+	},
+};
+
+static struct microp_i2c_platform_data microp_data = {
+	.num_functions   = ARRAY_SIZE(microp_functions),
+	.microp_function = microp_functions,
+	.num_devices = ARRAY_SIZE(microp_devices),
+	.microp_devices = microp_devices,
+	.gpio_reset = INCREDIBLEC_GPIO_UP_RESET_N,
+	.microp_ls_on = LS_PWR_ON | PS_PWR_ON,
+	.spi_devices = SPI_OJ | SPI_GSENSOR,
+};
+
+static struct gpio_led incrediblec_led_list[] = {
+	{
+		.name = "button-backlight",
+		.gpio = INCREDIBLEC_AP_KEY_LED_EN,
+		.active_low = 0,
+	},
+};
+
+static struct gpio_led_platform_data incrediblec_leds_data = {
+	.num_leds	= ARRAY_SIZE(incrediblec_led_list),
+	.leds		= incrediblec_led_list,
+};
+
+static struct platform_device incrediblec_leds = {
+	.name		= "leds-gpio",
+	.id		= -1,
+	.dev		= {
+		.platform_data	= &incrediblec_leds_data,
+	},
+};
+
+static uint32_t usb_phy_3v3_table[] = {
+	PCOM_GPIO_CFG(INCREDIBLEC_USB_PHY_3V3_ENABLE, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_4MA)
+};
+
+static uint32_t usb_ID_PIN_table[] = {
+	PCOM_GPIO_CFG(INCREDIBLEC_GPIO_USB_ID_PIN, 0, GPIO_INPUT, GPIO_NO_PULL, GPIO_4MA),
+};
+
+static int incrediblec_phy_init_seq[] = { 0x1D, 0x0D, 0x1D, 0x10, -1 };
+#ifdef CONFIG_USB_ANDROID
+static struct msm_hsusb_platform_data msm_hsusb_pdata = {
+	.phy_init_seq		= incrediblec_phy_init_seq,
+	.phy_reset		= msm_hsusb_8x50_phy_reset,
+	.usb_id_pin_gpio =  INCREDIBLEC_GPIO_USB_ID_PIN,
+};
+
+static struct usb_mass_storage_platform_data mass_storage_pdata = {
+	.nluns		= 3,
+	.vendor		= "HTC",
+	.product	= "Android Phone",
+	.release	= 0x0100,
+	.cdrom_lun	= 4,
+};
+
+static struct platform_device usb_mass_storage_device = {
+	.name	= "usb_mass_storage",
+	.id	= -1,
+	.dev	= {
+		.platform_data = &mass_storage_pdata,
+	},
+};
+
+static struct android_usb_platform_data android_usb_pdata = {
+	.vendor_id	= 0x0bb4,
+	.product_id	= 0x0c9e,
+	.version	= 0x0100,
+	.product_name		= "Android Phone",
+	.manufacturer_name	= "HTC",
+	.num_products = ARRAY_SIZE(usb_products),
+	.products = usb_products,
+	.num_functions = ARRAY_SIZE(usb_functions_all),
+	.functions = usb_functions_all,
+};
+
+static struct platform_device android_usb_device = {
+	.name	= "android_usb",
+	.id		= -1,
+	.dev		= {
+		.platform_data = &android_usb_pdata,
+	},
+};
+static void inc_add_usb_devices(void)
+{
+	android_usb_pdata.products[0].product_id =
+		android_usb_pdata.product_id;
+	android_usb_pdata.serial_number = board_serialno();
+	msm_hsusb_pdata.serial_number = board_serialno();
+	msm_device_hsusb.dev.platform_data = &msm_hsusb_pdata;
+	config_gpio_table(usb_phy_3v3_table, ARRAY_SIZE(usb_phy_3v3_table));
+	gpio_set_value(INCREDIBLEC_USB_PHY_3V3_ENABLE, 1);
+	config_gpio_table(usb_ID_PIN_table, ARRAY_SIZE(usb_ID_PIN_table));
+	platform_device_register(&msm_device_hsusb);
+	platform_device_register(&usb_mass_storage_device);
+	platform_device_register(&android_usb_device);
+}
+#endif
+
+static struct platform_device incrediblec_rfkill = {
+	.name = "incrediblec_rfkill",
+	.id = -1,
+};
 
 static struct resource qsd_spi_resources[] = {
 	{
@@ -524,7 +537,15 @@ static struct android_pmem_platform_data android_pmem_adsp_pdata = {
 	.cached		= 1,
 };
 
-
+#ifdef CONFIG_720P_CAMERA
+static struct android_pmem_platform_data android_pmem_venc_pdata = {
+	.name		= "pmem_venc",
+	.start		= MSM_PMEM_VENC_BASE,
+	.size		= MSM_PMEM_VENC_SIZE,
+	.no_allocator	= 0,
+	.cached		= 1,
+};
+#else
 static struct android_pmem_platform_data android_pmem_camera_pdata = {
 	.name		= "pmem_camera",
 	.start		= MSM_PMEM_CAMERA_BASE,
@@ -532,6 +553,7 @@ static struct android_pmem_platform_data android_pmem_camera_pdata = {
 	.no_allocator	= 1,
 	.cached		= 1,
 };
+#endif
 
 static struct platform_device android_pmem_mdp_device = {
 	.name		= "android_pmem",
@@ -549,6 +571,15 @@ static struct platform_device android_pmem_adsp_device = {
 	},
 };
 
+#ifdef CONFIG_720P_CAMERA
+static struct platform_device android_pmem_venc_device = {
+	.name		= "android_pmem",
+	.id		= 5,
+	.dev		= {
+		.platform_data = &android_pmem_venc_pdata,
+	},
+};
+#else
 static struct platform_device android_pmem_camera_device = {
 	.name		= "android_pmem",
 	.id		= 5,
@@ -556,6 +587,8 @@ static struct platform_device android_pmem_camera_device = {
 		.platform_data = &android_pmem_camera_pdata,
 	},
 };
+
+#endif
 
 static struct resource ram_console_resources[] = {
 	{
@@ -601,18 +634,20 @@ struct atmel_i2c_platform_data incrediblec_atmel_ts_data[] = {
 		.power = incrediblec_atmel_ts_power,
 		.config_T6 = {0, 0, 0, 0, 0, 0},
 		.config_T7 = {50, 15, 25},
-		.config_T8 = {6, 0, 20, 10, 0, 0, 5, 0},
-		.config_T9 = {139, 0, 0, 18, 12, 0, 16, 45, 3, 7, 0, 5, 2, 15, 2, 10, 25, 5, 0, 0, 0, 0, 0, 0, 0, 0, 159, 47, 149, 81},
+		.config_T8 = {10, 0, 20, 10, 0, 0, 5, 15},
+		.config_T9 = {139, 0, 0, 18, 12, 0, 16, 38, 3, 7, 0, 5, 2, 15, 2, 10, 25, 5, 0, 0, 0, 0, 0, 0, 0, 0, 159, 47, 149, 81, 40},
 		.config_T15 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T19 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		.config_T20 = {7, 0, 0, 0, 0, 0, 0, 40, 20, 4, 15, 0},
-		.config_T22 = {15, 0, 0, 0, 0, 0, 0, 0, 14, 0, 1, 8, 12, 16, 25, 30, 0},
+		.config_T20 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T22 = {15, 0, 0, 0, 0, 0, 0, 0, 16, 0, 1, 0, 7, 18, 25, 30, 0},
 		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T24 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T25 = {3, 0, 200, 50, 64, 31, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T27 = {0, 0, 0, 0, 0, 0, 0},
 		.config_T28 = {0, 0, 2, 4, 8, 60},
-		.object_crc = {0x41, 0xE5, 0x91},
+		.object_crc = {0xDB, 0xBF, 0x60},
+		.cable_config = {35, 30, 8, 16},
+		.GCAF_level = {20, 24, 28, 40, 63},
 		.filter_level = {15, 60, 963, 1008},
 	},
 	{
@@ -818,41 +853,28 @@ static void h2w_configure(int route)
 	}
 }
 
-static struct h2w_platform_data incrediblec_h2w_data = {
-	.cable_in1	= INCREDIBLEC_GPIO_CABLE_IN1,
-	.cable_in2	= INCREDIBLEC_GPIO_CABLE_IN2,
-	.h2w_clk	= INCREDIBLEC_GPIO_H2W_CLK,
-	.h2w_data	= INCREDIBLEC_GPIO_H2W_DATA,
-	.debug_uart = H2W_UART3,
-
-	.config		= h2w_configure,
-	.h2w_power	= h2w_dev_power_on,
-
-	.set_dat_dir	= set_h2w_dat_dir,
-	.set_clk_dir	= set_h2w_clk_dir,
-	.set_dat	= set_h2w_dat,
-	.set_clk	= set_h2w_clk,
-	.get_dat	= get_h2w_dat,
-	.get_clk	= get_h2w_clk,
+static struct htc_headset_mgr_platform_data htc_headset_mgr_data = {
 };
 
-static struct platform_device incrediblec_h2w = {
-	.name		= "htc_headset",
-	.id			= -1,
-	.dev		= {
-		.platform_data	= &incrediblec_h2w_data,
+static struct platform_device htc_headset_mgr = {
+	.name	= "HTC_HEADSET_MGR",
+	.id	= -1,
+	.dev	= {
+		.platform_data	= &htc_headset_mgr_data,
 	},
 };
 
-static struct audio_jack_platform_data incrediblec_jack_data = {
-	.gpio	= INCREDIBLEC_GPIO_35MM_HEADSET_DET,
+static struct htc_headset_gpio_platform_data htc_headset_gpio_data = {
+	.hpin_gpio		= INCREDIBLEC_GPIO_35MM_HEADSET_DET,
+	.key_enable_gpio	= NULL,
+	.mic_select_gpio	= NULL,
 };
 
-static struct platform_device incrediblec_audio_jack = {
-	.name		= "audio-jack",
-	.id			= -1,
-	.dev		= {
-		.platform_data	= &incrediblec_jack_data,
+static struct platform_device htc_headset_gpio = {
+	.name	= "HTC_HEADSET_GPIO",
+	.id	= -1,
+	.dev	= {
+		.platform_data	= &htc_headset_gpio_data,
 	},
 };
 
@@ -1021,17 +1043,28 @@ static struct msm_camera_device_platform_data msm_camera_device_data = {
 	.ioext.appsz  = MSM_CLK_CTL_SIZE,
 };
 
+static int flashlight_control(int mode)
+{
+	return aat1271_flashlight_control(mode);
+}
+
+static struct camera_flash_cfg msm_camera_sensor_flash_cfg = {
+	.camera_flash		= flashlight_control,
+	.num_flash_levels	= FLASHLIGHT_NUM,
+	.low_temp_limit		= 10,
+	.low_cap_limit		= 15,
+};
+
 static struct msm_camera_sensor_info msm_camera_sensor_ov8810_data = {
 	.sensor_name    = "ov8810",
 	.sensor_reset   = INCREDIBLEC_CAM_RST, /* CAM1_RST */
 	.sensor_pwd     = INCREDIBLEC_CAM_PWD,  /* CAM1_PWDN, enabled in a9 */
-	.pdata = &msm_camera_device_data,
-	.resource = msm_camera_resources,
-	.num_resources = ARRAY_SIZE(msm_camera_resources),
-	.camera_flash = flashlight_control,
-	.num_flash_levels = FLASHLIGHT_NUM,
-	.waked_up = 0,
-	.need_suspend = 0,
+	.pdata		= &msm_camera_device_data,
+	.resource	= msm_camera_resources,
+	.num_resources	= ARRAY_SIZE(msm_camera_resources),
+	.waked_up	= 0,
+	.need_suspend	= 0,
+	.flash_cfg	= &msm_camera_sensor_flash_cfg,
 };
 
 static struct platform_device msm_camera_sensor_ov8810 = {
@@ -1126,26 +1159,26 @@ static struct curcial_oj_platform_data incrediblec_oj_data = {
 	.oj_shutdown	= curcial_oj_shutdown,
 	.oj_adjust_xy = curcial_oj_adjust_xy,
 	.microp_version	= INCREDIBLEC_MICROP_VER,
+	.debugflag = 0,
 	.mdelay_time = 0,
-	.msleep_time = 1,
-	.send_count = 3,
-	.fast_th = 1,
-	.normal_th = 15,
-	.continue_th = 3,
-	.continue_max = 0,
+	.normal_th = 8,
 	.xy_ratio = 15,
-	.interval = 70,
-	.softclick	= true,
+	.interval = 20,
 	.swap		= true,
+	.ap_code = false,
 	.x 		= 1,
 	.y		= 1,
 	.share_power	= true,
-	.Xsteps = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-		2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-		2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
-	.Ysteps = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-		2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-		2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
+	.Xsteps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+		9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+		9, 9, 9, 9, 9, 9, 9, 9, 9, 9},
+	.Ysteps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+		9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+		9, 9, 9, 9, 9, 9, 9, 9, 9, 9},
+	.sht_tbl = {0, 2000, 2250, 2500, 2750, 3000},
+	.pxsum_tbl = {0, 0, 40, 50, 60, 70},
+	.degree = 6,
+	.irq = MSM_uP_TO_INT(12),
 };
 
 static struct platform_device incrediblec_oj = {
@@ -1182,6 +1215,43 @@ static int amoled_power(int on)
 		unsigned id, on = 0;
 
 		gpio_set_value(INCREDIBLEC_LCD_RST_ID1, 0);
+
+		id = PM_VREG_PDOWN_CAM_ID;
+		msm_proc_comm(PCOM_VREG_PULLDOWN, &on, &id);
+		vreg_disable(vreg_lcm_2v6);
+	}
+	return 0;
+}
+
+static int sonywvga_power(int on)
+{
+	unsigned id, on_off;
+	static struct vreg *vreg_lcm_2v6;
+	if (!vreg_lcm_2v6) {
+		vreg_lcm_2v6 = vreg_get(0, "gp1");
+		if (IS_ERR(vreg_lcm_2v6))
+			return -EINVAL;
+	}
+
+	if (on) {
+		on_off = 0;
+
+		id = PM_VREG_PDOWN_CAM_ID;
+		msm_proc_comm(PCOM_VREG_PULLDOWN, &on, &id);
+		vreg_enable(vreg_lcm_2v6);
+
+		gpio_set_value(INCREDIBLEC_LCD_RST_ID1, 1);
+		mdelay(10);
+		gpio_set_value(INCREDIBLEC_LCD_RST_ID1, 0);
+		udelay(500);
+		gpio_set_value(INCREDIBLEC_LCD_RST_ID1, 1);
+		mdelay(10);
+	} else {
+		on_off = 1;
+
+		gpio_set_value(INCREDIBLEC_LCD_RST_ID1, 0);
+
+		mdelay(120);
 
 		id = PM_VREG_PDOWN_CAM_ID;
 		msm_proc_comm(PCOM_VREG_PULLDOWN, &on, &id);
@@ -1242,11 +1312,31 @@ static uint32_t display_off_gpio_table[] = {
 	LCM_GPIO_CFG(INCREDIBLEC_LCD_DE, 0),
 };
 
+static uint32_t sony_display_on_gpio_table[] = {
+	LCM_GPIO_CFG(INCREDIBLEC_SPI_CLK, 1),
+	LCM_GPIO_CFG(INCREDIBLEC_SPI_CS, 1),
+	LCM_GPIO_CFG(INCREDIBLEC_LCD_ID0, 1),
+        LCM_GPIO_CFG(INCREDIBLEC_SPI_DO, 1),
+};
+
+static uint32_t sony_display_off_gpio_table[] = {
+	LCM_GPIO_CFG(INCREDIBLEC_SPI_CLK, 0),
+	LCM_GPIO_CFG(INCREDIBLEC_SPI_CS, 0),
+	LCM_GPIO_CFG(INCREDIBLEC_LCD_ID0, 0),
+        LCM_GPIO_CFG(INCREDIBLEC_SPI_DO, 0),
+};
+
 static int panel_gpio_switch(int on)
 {
-	if (on)
+	if (on) {
 		config_gpio_table(display_on_gpio_table,
 			ARRAY_SIZE(display_on_gpio_table));
+
+		if(panel_type != SAMSUNG_PANEL) {
+			config_gpio_table(sony_display_on_gpio_table,
+					ARRAY_SIZE(sony_display_on_gpio_table));
+		}
+	}
 	else {
 		int i;
 
@@ -1259,6 +1349,11 @@ static int panel_gpio_switch(int on)
 			gpio_set_value(i, 0);
 		for (i = INCREDIBLEC_LCD_B0; i <= INCREDIBLEC_LCD_DE; i++)
 			gpio_set_value(i, 0);
+
+		if(panel_type != SAMSUNG_PANEL) {
+			config_gpio_table(sony_display_off_gpio_table,
+					ARRAY_SIZE(sony_display_off_gpio_table));
+		}
 	}
 	return 0;
 }
@@ -1278,21 +1373,34 @@ static struct panel_platform_data amoled_data = {
 };
 
 static struct platform_device amoled_panel = {
-	.name = "amoled-panel",
+	.name = "panel-tl2796a",
 	.id = -1,
 	.dev = {
 		.platform_data = &amoled_data
 	},
 };
+
+static struct panel_platform_data sonywvga_data = {
+	.fb_res = &resources_msm_fb[0],
+	.power = sonywvga_power,
+	.gpio_switch = panel_gpio_switch,
+};
+
+static struct platform_device sonywvga_panel = {
+	.name = "panel-sonywvga-s6d16a0x21",
+	.id = -1,
+	.dev = {
+		.platform_data = &sonywvga_data,
+	},
+};
 static struct platform_device *devices[] __initdata = {
-	&amoled_panel,
 	&msm_device_uart1,
 #ifdef CONFIG_SERIAL_MSM_HS
 	&msm_device_uart_dm1,
 #endif
-	&incrediblec_h2w,
 	&htc_battery_pdev,
-	&incrediblec_audio_jack,
+	&htc_headset_mgr,
+	&htc_headset_gpio,
 	&ram_console_device,
 	&incrediblec_rfkill,
 	&msm_device_smd,
@@ -1301,7 +1409,11 @@ static struct platform_device *devices[] __initdata = {
 	/*&usb_mass_storage_device,*/
 	&android_pmem_mdp_device,
 	&android_pmem_adsp_device,
+#ifdef CONFIG_720P_CAMERA
+	&android_pmem_venc_device,
+#else
 	&android_pmem_camera_device,
+#endif
 	&msm_camera_sensor_ov8810,
 	&msm_kgsl_device,
 	&msm_device_i2c,
@@ -1312,7 +1424,6 @@ static struct platform_device *devices[] __initdata = {
 	&qsd_device_spi,
 #endif
 	&incrediblec_oj,
-	&capella_cm3602
 };
 
 static uint32_t incrediblec_serial_debug_table[] = {
@@ -1331,14 +1442,6 @@ static uint32_t incrediblec_uart_gpio_table[] = {
 	/* TX */
         PCOM_GPIO_CFG(INCREDIBLEC_GPIO_UART3_TX, 3, GPIO_INPUT, GPIO_NO_PULL,
                       GPIO_4MA),
-};
-
-static uint32_t incrediblec_usb_phy_3v3_table[] = {
-	PCOM_GPIO_CFG(INCREDIBLEC_USB_PHY_3V3_ENABLE, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_4MA)
-};
-
-static uint32_t usb_ID_PIN_table[] = {
-	PCOM_GPIO_CFG(INCREDIBLEC_GPIO_USB_ID_PIN, 0, GPIO_INPUT, GPIO_NO_PULL, GPIO_4MA),
 };
 
 static void incrediblec_config_serial_debug_gpios(void)
@@ -1361,6 +1464,7 @@ static struct msm_i2c_device_platform_data msm_i2c_pdata = {
 
 static void __init msm_device_i2c_init(void)
 {
+	msm_i2c_gpio_init();
 	msm_device_i2c.dev.platform_data = &msm_i2c_pdata;
 }
 
@@ -1387,7 +1491,7 @@ int incrediblec_init_mmc(int sysrev);
 
 #ifdef CONFIG_SERIAL_MSM_HS
 static struct msm_serial_hs_platform_data msm_uart_dm1_pdata = {
-	.wakeup_irq = MSM_GPIO_TO_INT(INCREDIBLEC_GPIO_BT_HOST_WAKE),	/*Chip to Device*/
+	.rx_wakeup_irq = MSM_GPIO_TO_INT(INCREDIBLEC_GPIO_BT_HOST_WAKE),	/*Chip to Device*/
 	.inject_rx_on_wakeup = 0,
 	.cpu_lock_supported = 0,
 
@@ -1467,6 +1571,18 @@ static void incrediblec_reset(void)
        gpio_set_value(INCREDIBLEC_GPIO_PS_HOLD, 0);
 }
 
+static int incrediblec_init_panel(void)
+{
+	int ret = 0;
+
+	if (panel_type != SAMSUNG_PANEL)
+		ret = platform_device_register(&sonywvga_panel);
+	else
+		ret = platform_device_register(&amoled_panel);
+
+	return ret;
+}
+
 static void __init incrediblec_init(void)
 {
 	int ret;
@@ -1489,8 +1605,6 @@ static void __init incrediblec_init(void)
 	}
 
 	OJ_BMA_power();
-
-	gpio_direction_output(INCREDIBLEC_GPIO_PROXIMITY_EN_N, 0);
 
 	msm_acpu_clock_init(&incrediblec_clock_data);
 
@@ -1527,13 +1641,9 @@ static void __init incrediblec_init(void)
 	incrediblec_microp_init();
 #endif
 
-	msm_init_ums_lun(2); /*0: sd card, 1: moving nand*/
-	msm_register_usb_phy_init_seq(incrediblec_phy_init_seq);
-	msm_hsusb_set_product(incrediblec_usb_products,
-		ARRAY_SIZE(incrediblec_usb_products));
-	msm_register_uart_usb_switch(NULL);
-	msm_add_usb_id_pin_gpio(INCREDIBLEC_GPIO_USB_ID_PIN);
-	msm_add_usb_devices(msm_hsusb_8x50_phy_reset, NULL);
+#ifdef CONFIG_USB_ANDROID
+	inc_add_usb_devices();
+#endif
 
 	if (system_rev >= 2) {
 		microp_data.num_functions   = ARRAY_SIZE(microp_functions_1);
@@ -1541,6 +1651,13 @@ static void __init incrediblec_init(void)
 	}
 
 	platform_add_devices(devices, ARRAY_SIZE(devices));
+	incrediblec_init_panel();
+	if (system_rev > 2) {
+		incrediblec_atmel_ts_data[0].config_T9[7] = 33;
+		incrediblec_atmel_ts_data[0].object_crc[0] = 0x2E;
+		incrediblec_atmel_ts_data[0].object_crc[1] = 0x80;
+		incrediblec_atmel_ts_data[0].object_crc[2] = 0xE0;
+	}
 	i2c_register_board_info(0, i2c_devices, ARRAY_SIZE(i2c_devices));
 
 	ret = incrediblec_init_mmc(system_rev);
@@ -1556,9 +1673,6 @@ static void __init incrediblec_init(void)
 
 	msm_init_pmic_vibrator();
 
-	config_gpio_table(incrediblec_usb_phy_3v3_table, ARRAY_SIZE(incrediblec_usb_phy_3v3_table));
-	config_gpio_table(usb_ID_PIN_table, ARRAY_SIZE(usb_ID_PIN_table));
-	gpio_direction_output(INCREDIBLEC_USB_PHY_3V3_ENABLE, 1);
 }
 
 static void __init incrediblec_fixup(struct machine_desc *desc, struct tag *tags,

@@ -38,9 +38,11 @@
 #endif
 
 #include "smd_private.h"
+#include "smd_rpcrouter.h"
 #include "acpuclock.h"
 #include "proc_comm.h"
 #include "clock.h"
+#include "spm.h"
 #ifdef CONFIG_HAS_WAKELOCK
 #include <linux/wakelock.h>
 #endif
@@ -75,9 +77,15 @@ module_param_named(idle_sleep_min_time, msm_pm_idle_sleep_min_time, int, S_IRUGO
 static int msm_pm_idle_spin_time = CONFIG_MSM7X00A_IDLE_SPIN_TIME;
 module_param_named(idle_spin_time, msm_pm_idle_spin_time, int, S_IRUGO | S_IWUSR | S_IWGRP);
 
+#if defined (CONFIG_ARCH_MSM7X30)
+#define A11S_CLK_SLEEP_EN (MSM_GCC_BASE + 0x020)
+#define A11S_PWRDOWN (MSM_ACC_BASE + 0x01C)
+#define A11S_SECOP (MSM_TCSR_BASE + 0x38)
+#else
 #define A11S_CLK_SLEEP_EN (MSM_CSR_BASE + 0x11c)
 #define A11S_PWRDOWN (MSM_CSR_BASE + 0x440)
 #define A11S_STANDBY_CTL (MSM_CSR_BASE + 0x108)
+#endif
 #define A11RAMBACKBIAS (MSM_CSR_BASE + 0x508)
 
 #if defined(CONFIG_MSM_N_WAY_SMD)
@@ -132,6 +140,9 @@ int msm_irq_idle_sleep_allowed(void);
 int msm_irq_pending(void);
 int clks_allow_tcxo_locked_debug(void);
 extern int board_mfg_mode(void);
+extern char * board_get_mfg_sleep_gpio_table(void);
+extern void gpio_set_diag_gpio_table(unsigned long * dwMFG_gpio_table);
+extern void wait_rmt_final_call_back(int timeout);
 
 static int axi_rate;
 static int sleep_axi_rate;
@@ -258,6 +269,9 @@ static int msm_sleep(int sleep_mode, uint32_t sleep_delay, int from_idle)
 	int rv = -EINTR;
 	bool invalid_inital_state = false;
 
+	if (board_mfg_mode() == 4) /*power test mode*/
+		gpio_set_diag_gpio_table(board_get_mfg_sleep_gpio_table());
+
 	if (msm_pm_debug_mask & MSM_PM_DEBUG_SUSPEND)
 		printk(KERN_INFO "msm_sleep(): mode %d delay %u idle %d\n",
 		       sleep_mode, sleep_delay, from_idle);
@@ -351,10 +365,15 @@ static int msm_sleep(int sleep_mode, uint32_t sleep_delay, int from_idle)
 		goto enter_failed;
 
 	if (enter_state) {
+#if defined (CONFIG_ARCH_MSM7X30)
+		writel(1, A11S_PWRDOWN);
+		writel(4, A11S_SECOP);
+#else
 		writel(0x1f, A11S_CLK_SLEEP_EN);
 		writel(1, A11S_PWRDOWN);
 
 		writel(0, A11S_STANDBY_CTL);
+#endif
 #if !defined(CONFIG_MSM_N_WAY_SMD)
 		writel(0, A11RAMBACKBIAS);
 #endif
@@ -404,6 +423,8 @@ static int msm_sleep(int sleep_mode, uint32_t sleep_delay, int from_idle)
 		l2x0_suspend();
 #endif
 		if (!from_idle) printk(KERN_INFO "[R] suspend end\n");
+		/* reset idle sleep mode when suspend. */
+		if (!from_idle) msm_pm_idle_sleep_mode = CONFIG_MSM7X00A_IDLE_SLEEP_MODE;
 		collapsed = msm_pm_collapse();
 		if (!from_idle) printk(KERN_INFO "[R] resume start\n");
 #ifdef CONFIG_CACHE_L2X0
@@ -439,7 +460,7 @@ static int msm_sleep(int sleep_mode, uint32_t sleep_delay, int from_idle)
 		if (msm_pm_debug_mask & MSM_PM_DEBUG_CLOCK)
 			printk(KERN_INFO "msm_sleep(): exit power collapse %ld"
 			       "\n", pm_saved_acpu_clk_rate);
-#if defined(CONFIG_ARCH_MSM_SCORPION)
+#if defined(CONFIG_ARCH_QSD8X50)
 		if (acpuclk_set_rate(pm_saved_acpu_clk_rate, 1) < 0)
 #else
 		if (acpuclk_set_rate(pm_saved_acpu_clk_rate,
@@ -463,8 +484,14 @@ ramp_down_failed:
 	msm_irq_exit_sleep1();
 enter_failed:
 	if (enter_state) {
+#if defined (CONFIG_ARCH_MSM7X30)
+		writel(0, A11S_SECOP);
+		writel(0, A11S_PWRDOWN);
+		msm_spm_reinit();
+#else
 		writel(0x00, A11S_CLK_SLEEP_EN);
 		writel(0, A11S_PWRDOWN);
+#endif
 		smsm_change_state(PM_SMSM_WRITE_STATE, enter_state, exit_state);
 		msm_pm_wait_state(0, exit_wait_clear, exit_wait_any_set, 0);
 		if (msm_pm_debug_mask & MSM_PM_DEBUG_STATE)
@@ -564,7 +591,7 @@ void arch_idle(void)
 		if (msm_pm_debug_mask & MSM_PM_DEBUG_CLOCK)
 			printk(KERN_DEBUG "msm_sleep: clk swfi -> %ld\n",
 				saved_rate);
-#if defined(CONFIG_ARCH_MSM_SCORPION)
+#if defined(CONFIG_ARCH_QSD8X50)
 		if (saved_rate && acpuclk_set_rate(saved_rate, 1) < 0)
 #else
 		if (saved_rate
@@ -643,10 +670,17 @@ module_param_call(wakeup_after, msm_power_wakeup_after, param_get_int,
 static void msm_pm_power_off(void)
 {
 	printk(KERN_INFO "msm_pm_power_off:wakeup after %d\r\n", msm_wakeup_after);
+
 	if (msm_wakeup_after)
 		msm_proc_comm(PCOM_SET_RTC_ALARM, &msm_wakeup_after, 0);
 
 	msm_proc_comm(PCOM_POWER_DOWN, 0, 0);
+
+#if CONFIG_MSM_RMT_STORAGE_SERVER
+		printk(KERN_INFO "from %s\r\n", __func__);
+		wait_rmt_final_call_back(10);
+		printk(KERN_INFO "back %s\r\n", __func__);
+#endif
 	for (;;) ;
 }
 
@@ -678,11 +712,30 @@ void msm_pm_flush_console(void)
 static void msm_pm_restart(char str)
 {
 	msm_pm_flush_console();
+
 	/*  always reboot device through proc comm */
 	if (restart_reason == 0x6f656d99)
 		msm_proc_comm(PCOM_RESET_CHIP_IMM, &restart_reason, 0);
 	else
 		msm_proc_comm(PCOM_RESET_CHIP, &restart_reason, 0);
+
+#if CONFIG_MSM_RMT_STORAGE_SERVER
+	printk(KERN_INFO "from %s\r\n", __func__);
+	wait_rmt_final_call_back(10);
+	printk(KERN_INFO "back %s\r\n", __func__);
+	/* wait 2 seconds to let radio reset device after the final EFS sync*/
+	mdelay(2000);
+#else
+	/* In case Radio is dead, reset device after notify Radio 5 seconds */
+	mdelay(5000);
+#endif
+
+	/* hard reboot if possible */
+	if (msm_hw_reset_hook) {
+		printk(KERN_INFO "%s : Do HW_RESET by APP not by RADIO\r\n", __func__);
+		msm_hw_reset_hook();
+	}
+
 	for (;;) ;
 }
 
@@ -832,8 +885,8 @@ static int __init msm_pm_init(void)
 #endif
 
 	register_reboot_notifier(&msm_reboot_notifier);
+	msm_pm_reset_vector = ioremap(0x0, PAGE_SIZE);
 
-	msm_pm_reset_vector = ioremap(0, PAGE_SIZE);
 	if (msm_pm_reset_vector == NULL) {
 		printk(KERN_ERR "msm_pm_init: failed to map reset vector\n");
 		return -ENODEV;
@@ -846,8 +899,7 @@ static int __init msm_pm_init(void)
 				NULL, msm_pm_read_proc, NULL);
 #endif
 
-	if (board_mfg_mode() == 0)
-	{
+	if ((board_mfg_mode() == 0) || (board_mfg_mode() == 1)) {
 		disable_hlt();
 		schedule_delayed_work(&work_expire_boot_lock, BOOT_LOCK_TIMEOUT);
 		pr_info("Acquire 'boot-time' halt_lock\n");

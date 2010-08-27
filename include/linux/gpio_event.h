@@ -37,6 +37,9 @@ struct gpio_event_info {
 		     void **data, unsigned int dev, unsigned int type,
 		     unsigned int code, int value); /* out events */
 	bool no_suspend;
+#ifdef CONFIG_OPTICALJOYSTICK_CRUCIAL
+	bool oj_btn;
+#endif
 };
 
 struct gpio_event_platform_data {
@@ -91,6 +94,7 @@ struct gpio_event_matrix_info {
 	void (*setup_ninputs_gpio)(void);
 	/* disable some gpio as wakeup source */
 	unsigned int notintr_gpios;
+	unsigned int detect_phone_status;
 };
 
 /* Directly connected inputs and outputs */
@@ -162,11 +166,6 @@ struct gpio_event_axis_info {
 	uint16_t (*map)(struct gpio_event_axis_info *info, uint16_t in);
 	uint32_t *gpio;
 	uint32_t flags;
-#ifdef CONFIG_MACH_HERO
-	uint32_t enable_emc_protect_delay;
-	uint16_t emc_gpio_state;
-	atomic_t emc_disable_irqnum;
-#endif
 };
 #define gpio_axis_2bit_gray_map gpio_axis_4bit_gray_map
 #define gpio_axis_3bit_gray_map gpio_axis_4bit_gray_map
@@ -174,8 +173,5 @@ uint16_t gpio_axis_4bit_gray_map(
 			struct gpio_event_axis_info *info, uint16_t in);
 uint16_t gpio_axis_5bit_singletrack_map(
 			struct gpio_event_axis_info *info, uint16_t in);
-#ifdef CONFIG_MACH_HEROC
-uint8_t button_filter(struct input_dev *dev,
-		 unsigned int type, unsigned int code, int value, unsigned long *key_pressed);
-#endif
+
 #endif

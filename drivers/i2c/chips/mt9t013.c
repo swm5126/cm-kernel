@@ -1298,7 +1298,6 @@ static int mt9t013_remove(struct i2c_client *client)
 	struct mt9t013_data *mt = i2c_get_clientdata(client);
 	free_irq(client->irq, mt);
 	deinit_suspend();
-	i2c_detach_client(client);
 	pclient = NULL;
 	misc_deregister(&mt9t013_device);
 	kfree(mt);

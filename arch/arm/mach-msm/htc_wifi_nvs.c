@@ -62,7 +62,6 @@ static int __init parse_tag_msm_wifi(const struct tag *tag)
 
 __tagtable(ATAG_MSM_WIFI, parse_tag_msm_wifi);
 
-#ifdef CONFIG_WIFI_NVS_PROC_CREATE
 static unsigned wifi_get_nvs_size( void )
 {
 	unsigned char *ptr;
@@ -75,6 +74,14 @@ static unsigned wifi_get_nvs_size( void )
 	return len;
 }
 
+int wifi_calibration_size_set(void)
+{
+	if (wifi_calibration != NULL)
+		wifi_calibration->size = wifi_get_nvs_size();
+	return 0;
+}
+
+#ifdef CONFIG_WIFI_NVS_PROC_CREATE
 static int wifi_calibration_read_proc(char *page, char **start, off_t off,
 					int count, int *eof, void *data)
 {
@@ -118,4 +125,3 @@ static int __init wifi_nvs_init(void)
 }
 
 late_initcall(wifi_nvs_init);
-

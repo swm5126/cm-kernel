@@ -330,3 +330,5 @@ void mdp_ppp_init_scale(const struct mdp_info *mdp)
 	for (scale = 0; scale < MDP_SCALE_MAX; ++scale)
 		load_table(mdp, scale, 0);
 }
+
+

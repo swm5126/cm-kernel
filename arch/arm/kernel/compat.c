@@ -65,11 +65,9 @@ struct param_struct {
 	    unsigned long initrd_size;		/* 68 */
 	    unsigned long rd_start;		/* 72 */
 	    unsigned long system_rev;		/* 76 */
-	    unsigned char microp_version[4];	/* 80 */
-	    unsigned long system_serial_low;	/* 84 */
-	    unsigned long system_serial_high;	/* 88 */
-	    unsigned long mem_fclk_21285;       /* 92 */
-	    unsigned long als_kadc;			/* 96 */
+	    unsigned long system_serial_low;	/* 80 */
+	    unsigned long system_serial_high;	/* 84 */
+	    unsigned long mem_fclk_21285;       /* 88 */
 	} s;
 	char unused[256];
     } u1;
@@ -97,7 +95,6 @@ static struct tag * __init memtag(struct tag *tag, unsigned long start, unsigned
 static void __init build_tag_list(struct param_struct *params, void *taglist)
 {
 	struct tag *tag = taglist;
-	int j;
 
 	if (params->u1.s.page_size != PAGE_SIZE) {
 		printk(KERN_WARNING "Warning: bad configuration page, "
@@ -154,17 +151,6 @@ static void __init build_tag_list(struct param_struct *params, void *taglist)
 	tag->hdr.tag = ATAG_REVISION;
 	tag->hdr.size = tag_size(tag_revision);
 	tag->u.revision.rev = params->u1.s.system_rev;
-
-	tag = tag_next(tag);
-	tag->hdr.tag = ATAG_MICROP_VERSION;
-	tag->hdr.size = tag_size(tag_microp_version);
-	for (j = 0; j < 4; j++)
-		tag->u.microp_version.ver[j] = params->u1.s.microp_version[j];
-
-	tag = tag_next(tag);
-	tag->hdr.tag = ATAG_ALS;
-	tag->hdr.size = tag_size(tag_als_kadc);
-	tag->u.als_kadc.kadc = params->u1.s.als_kadc;
 
 #ifdef CONFIG_ARCH_ACORN
 	if (machine_is_riscpc()) {

@@ -304,10 +304,10 @@ __cpu_early_init:
         MCR    p15, 3, r0, c9, c1, 6    //; WCP15_DCFLOOR6  r0
         MCR    p15, 3, r0, c9, c1, 7    //; WCP15_DCFLOOR7  r0
 
-	//; Initialize ASID to zero
+        //; Initialize ASID to zero
         MCR    p15, 0, r0, c13, c0, 1   //; WCP15_CONTEXTIDR r0
 
-	//; ICIALL to invalidate entire I-Cache
+        //; ICIALL to invalidate entire I-Cache
         MCR    p15, 0, r0, c7, c5, 0    //; ICIALLU
 
         //; DCIALL to invalidate entire D-Cache
