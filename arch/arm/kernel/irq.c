@@ -27,7 +27,6 @@
 #include <linux/ioport.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
-#include <linux/slab.h>
 #include <linux/random.h>
 #include <linux/smp.h>
 #include <linux/init.h>
@@ -69,7 +68,7 @@ int show_interrupts(struct seq_file *p, void *v)
 	}
 
 	if (i < NR_IRQS) {
-		spin_lock_irqsave(&irq_desc[i].lock, flags);
+		raw_spin_lock_irqsave(&irq_desc[i].lock, flags);
 		action = irq_desc[i].action;
 		if (!action)
 			goto unlock;
@@ -84,7 +83,7 @@ int show_interrupts(struct seq_file *p, void *v)
 
 		seq_putc(p, '\n');
 unlock:
-		spin_unlock_irqrestore(&irq_desc[i].lock, flags);
+		raw_spin_unlock_irqrestore(&irq_desc[i].lock, flags);
 	} else if (i == NR_IRQS) {
 #ifdef CONFIG_FIQ
 		show_fiq_list(p, v);
@@ -97,6 +96,45 @@ unlock:
 	}
 	return 0;
 }
+
+#ifdef CONFIG_ARCH_MSM8X60_LTE
+unsigned int previous_irqs[NR_IRQS+1] = {0};
+void htc_show_interrupt(int i)
+{
+	struct irqaction * action;
+	unsigned long flags;
+	if (i < NR_IRQS) {
+		raw_spin_lock_irqsave(&irq_desc[i].lock, flags);
+		action = irq_desc[i].action;
+		if (!action)
+			goto unlock;
+		if(!(kstat_irqs_cpu(i, 0)) || previous_irqs[i] == (kstat_irqs_cpu(i, 0)))
+			goto unlock;
+		printk("%3d:", i);
+		printk("%6u\t", kstat_irqs_cpu(i, 0)-previous_irqs[i]);
+		printk("%s", action->name);
+		for (action = action->next; action; action = action->next)
+			printk(", %s", action->name);
+		printk("\n");
+		previous_irqs[i] = kstat_irqs_cpu(i, 0);
+unlock:
+		raw_spin_unlock_irqrestore(&irq_desc[i].lock, flags);
+	} else if (i == NR_IRQS) {
+		if(previous_irqs[NR_IRQS] == irq_err_count)
+			return;
+		printk("Err: %lud\n", irq_err_count-previous_irqs[NR_IRQS]);
+		previous_irqs[NR_IRQS] = irq_err_count;
+	}
+}
+
+void htc_show_interrupts(void)
+{
+	int i = 0;
+	for(i=0;i<=NR_IRQS;i++)
+		htc_show_interrupt(i);
+}
+#endif
+
 
 /*
  * do_IRQ handles all hardware IRQ's.  Decoded IRQs should not
@@ -139,7 +177,7 @@ void set_irq_flags(unsigned int irq, unsigned int iflags)
 	}
 
 	desc = irq_desc + irq;
-	spin_lock_irqsave(&desc->lock, flags);
+	raw_spin_lock_irqsave(&desc->lock, flags);
 	desc->status |= IRQ_NOREQUEST | IRQ_NOPROBE | IRQ_NOAUTOEN;
 	if (iflags & IRQF_VALID)
 		desc->status &= ~IRQ_NOREQUEST;
@@ -147,7 +185,7 @@ void set_irq_flags(unsigned int irq, unsigned int iflags)
 		desc->status &= ~IRQ_NOPROBE;
 	if (!(iflags & IRQF_NOAUTOEN))
 		desc->status &= ~IRQ_NOAUTOEN;
-	spin_unlock_irqrestore(&desc->lock, flags);
+	raw_spin_unlock_irqrestore(&desc->lock, flags);
 }
 
 void __init init_IRQ(void)
@@ -166,9 +204,9 @@ static void route_irq(struct irq_desc *desc, unsigned int irq, unsigned int cpu)
 {
 	pr_debug("IRQ%u: moving from cpu%u to cpu%u\n", irq, desc->node, cpu);
 
-	spin_lock_irq(&desc->lock);
+	raw_spin_lock_irq(&desc->lock);
 	desc->chip->set_affinity(irq, cpumask_of(cpu));
-	spin_unlock_irq(&desc->lock);
+	raw_spin_unlock_irq(&desc->lock);
 }
 
 /*

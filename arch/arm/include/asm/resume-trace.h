@@ -4,4 +4,3 @@
 #define TRACE_RESUME(dev) do { } while (0)
 
 #endif /* _ASM_ARM_RESUME_TRACE_H */
-

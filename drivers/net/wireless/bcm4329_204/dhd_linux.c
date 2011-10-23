@@ -43,6 +43,9 @@
 #include <linux/ethtool.h>
 #include <linux/fcntl.h>
 #include <linux/fs.h>
+#include <linux/ioprio.h>
+
+#include <mach/perflock.h>
 
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
@@ -71,6 +74,8 @@ struct dhd_bus *g_bus;
 
 static struct wifi_platform_data *wifi_control_data = NULL;
 static struct resource *wifi_irqres = NULL;
+static int module_remove = 0;
+static int module_insert = 0;
 
 #if 0
 extern int htc_linux_periodic_wakeup_init(void);
@@ -95,6 +100,14 @@ int wifi_get_dot11n_enable(void)
 {
         if (wifi_control_data && wifi_control_data->dot11n_enable) {
                 return wifi_control_data->dot11n_enable;
+        }
+        return 0;
+}
+
+int wifi_get_cscan_enable(void)
+{
+        if (wifi_control_data && wifi_control_data->cscan_enable) {
+                return wifi_control_data->cscan_enable;
         }
         return 0;
 }
@@ -605,7 +618,11 @@ static void
 _dhd_set_multicast_list(dhd_info_t *dhd, int ifidx)
 {
 	struct net_device *dev;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35)
+	struct netdev_hw_addr *ha;
+#else
 	struct dev_mc_list *mclist;
+#endif
 	uint32 allmulti, cnt;
 
 	wl_ioctl_t ioc;
@@ -615,8 +632,14 @@ _dhd_set_multicast_list(dhd_info_t *dhd, int ifidx)
 
 	ASSERT(dhd && dhd->iflist[ifidx]);
 	dev = dhd->iflist[ifidx]->net;
-	mclist = dev->mc_list;
+
+	netif_addr_lock_bh(dev);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35)
+	cnt = netdev_mc_count(dev);
+#else
 	cnt = dev->mc_count;
+#endif
+	netif_addr_unlock_bh(dev);
 
 	/* Determine initial value of allmulti flag */
 	allmulti = (dev->flags & IFF_ALLMULTI) ? TRUE : FALSE;
@@ -638,10 +661,22 @@ _dhd_set_multicast_list(dhd_info_t *dhd, int ifidx)
 	memcpy(bufp, &cnt, sizeof(cnt));
 	bufp += sizeof(cnt);
 
-	for (cnt = 0; mclist && (cnt < dev->mc_count); cnt++, mclist = mclist->next) {
+	netif_addr_lock_bh(dev);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35)
+	netdev_for_each_mc_addr(ha, dev) {
+		if (!cnt)
+			break;
+		memcpy(bufp, ha->addr, ETHER_ADDR_LEN);
+		bufp += ETHER_ADDR_LEN;
+		cnt--;
+	}
+#else
+	for (mclist = dev->mc_list;(mclist && (cnt > 0)); cnt--, mclist = mclist->next) {
 		memcpy(bufp, (void *)mclist->dmi_addr, ETHER_ADDR_LEN);
 		bufp += ETHER_ADDR_LEN;
 	}
+#endif
+	netif_addr_unlock_bh(dev);
 
 	memset(&ioc, 0, sizeof(ioc));
 	ioc.cmd = WLC_SET_VAR;
@@ -651,7 +686,7 @@ _dhd_set_multicast_list(dhd_info_t *dhd, int ifidx)
 
 	ret = dhd_prot_ioctl(&dhd->pub, ifidx, &ioc, ioc.buf, ioc.len);
 	if (ret < 0) {
-		DHD_ERROR(("%s: set mcast_list failed, cnt %d\n",
+		DHD_DEFAULT(("%s: set mcast_list failed, cnt %d\n",
 			dhd_ifname(&dhd->pub, ifidx), cnt));
 		allmulti = cnt ? TRUE : allmulti;
 	}
@@ -686,7 +721,7 @@ _dhd_set_multicast_list(dhd_info_t *dhd, int ifidx)
 
 	ret = dhd_prot_ioctl(&dhd->pub, ifidx, &ioc, ioc.buf, ioc.len);
 	if (ret < 0) {
-		DHD_ERROR(("%s: set allmulti %d failed\n",
+		DHD_DEFAULT(("%s: set allmulti %d failed\n",
 		           dhd_ifname(&dhd->pub, ifidx), ltoh32(allmulti)));
 	}
 
@@ -776,7 +811,11 @@ dhd_op_if(dhd_if_t *ifp)
 			ret = -ENOMEM;
 		}
 		if (ret == 0) {
-			strcpy(ifp->net->name, ifp->name);
+#ifdef HTC_KlocWork
+            strncpy(ifp->net->name, ifp->name, IFNAMSIZ);
+#else
+            strcpy(ifp->net->name, ifp->name);
+#endif
 			memcpy(netdev_priv(ifp->net), &dhd, sizeof(dhd));
 			if ((err = dhd_net_attach(&dhd->pub, ifp->idx)) != 0) {
 				DHD_ERROR(("%s: dhd_net_attach failed, err %d\n",
@@ -817,11 +856,13 @@ dhd_op_if(dhd_if_t *ifp)
 			free_netdev(ifp->net);
 		}
 		dhd->iflist[ifp->idx] = NULL;
-		MFREE(dhd->pub.osh, ifp, sizeof(*ifp));
+		
 #ifdef CONFIG_BCM4329_SOFTAP
 		if (ifp->net == ap_net_dev)
 			ap_net_dev = NULL;     /* NULL SOFTAP global as well */
 #endif /*  CONFIG_BCM4329_SOFTAP */
+
+		MFREE(dhd->pub.osh, ifp, sizeof(*ifp));
 	}
 }
 
@@ -853,6 +894,8 @@ _dhd_sysioc_thread(void *data)
 		}
 		dhd_os_wake_unlock(&dhd->pub);
 	}
+
+	myprintf("%s exit\n", __func__);
 	complete_and_exit(&dhd->sysioc_exited, 0);
 }
 
@@ -864,6 +907,14 @@ dhd_set_mac_address(struct net_device *dev, void *addr)
 	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
 	struct sockaddr *sa = (struct sockaddr *)addr;
 	int ifidx;
+
+	myprintf("enter %s\n", __func__);
+
+	/* BRCM: anthony, add for debug, reject if down */
+	if ( !dhd->pub.up || (dhd->pub.busstate == DHD_BUS_DOWN)) {
+		DHD_DEFAULT(("%s: dhd is down. skip it.\n", __func__));
+		return -ENODEV;
+	}
 
 	ifidx = dhd_net2idx(dhd, dev);
 	if (ifidx == DHD_BAD_IF)
@@ -882,6 +933,15 @@ dhd_set_multicast_list(struct net_device *dev)
 {
 	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
 	int ifidx;
+
+
+	myprintf("enter %s\n", __func__);
+
+	/* BRCM: anthoy, add for debug, reject if down */
+	if ( !dhd->pub.up || (dhd->pub.busstate == DHD_BUS_DOWN) ) {
+		DHD_DEFAULT(("%s: dhd is down. skip it.\n", __func__));
+		return;
+	}
 
 	ifidx = dhd_net2idx(dhd, dev);
 	if (ifidx == DHD_BAD_IF)
@@ -941,16 +1001,26 @@ dhd_start_xmit(struct sk_buff *skb, struct net_device *net)
 
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
+	if (module_remove) {
+		DHD_ERROR(("%s: module removed.", __FUNCTION__));
+		netif_stop_queue(net);
+		dev_kfree_skb(skb); // Add to free skb
+		return -ENODEV;
+	}
+
 	/* Reject if down */
 	if (!dhd->pub.up || (dhd->pub.busstate == DHD_BUS_DOWN)) {
 		DHD_ERROR(("%s: xmit rejected due to dhd bus down status \n", __FUNCTION__));
 		netif_stop_queue(net);
+		dev_kfree_skb(skb);
 		return -ENODEV;
 	}
 
 	ifidx = dhd_net2idx(dhd, net);
 	if (ifidx == DHD_BAD_IF) {
 		DHD_ERROR(("%s: bad ifidx %d\n", __FUNCTION__, ifidx));
+		netif_stop_queue(net);
+		dev_kfree_skb(skb);
 		return -ENODEV;
 	}
 
@@ -1023,6 +1093,20 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt)
 	wl_event_msg_t event;
 
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
+
+	if (module_remove || (!module_insert)) {
+		for (i = 0; pktbuf && i < numpkt; i++, pktbuf = pnext) {
+			pnext = PKTNEXT(dhdp->osh, pktbuf);
+			PKTSETNEXT(wl->sh.osh, pktbuf, NULL);
+			skb = PKTTONATIVE(dhdp->osh, pktbuf);
+			dev_kfree_skb_any(skb);
+		}
+		if (!module_insert)
+			DHD_ERROR(("%s: module not insert, skip\n", __FUNCTION__));
+		else
+			DHD_ERROR(("%s: module removed. skip rx frame\n", __FUNCTION__));
+		return;
+	}
 
 	save_pktbuf = pktbuf;
 
@@ -1208,7 +1292,7 @@ dhd_watchdog_thread(void *data)
 		else
 			break;
 	}
-
+	myprintf("%s exit\n", __func__);
 	complete_and_exit(&dhd->watchdog_exited, 0);
 }
 
@@ -1237,6 +1321,22 @@ dhd_watchdog(ulong data)
 #endif /* defined(CONTINUOUS_WATCHDOG) */
 }
 
+//HTC_CSP_START
+extern int wlan_ioprio_idle;
+static int prev_wlan_ioprio_idle=0;
+static inline void set_wlan_ioprio(void)
+{
+        int ret, prio;
+
+        if(wlan_ioprio_idle == 1){
+                prio = ((IOPRIO_CLASS_IDLE << IOPRIO_CLASS_SHIFT) | 0);
+        } else {
+                prio = ((IOPRIO_CLASS_NONE << IOPRIO_CLASS_SHIFT) | 4);
+        }
+        ret = set_task_ioprio(current, prio);
+        DHD_DEFAULT(("set_wlan_ioprio: prio=0x%X, ret=%d\n", prio, ret));
+}
+//HTC_CSP_END
 static int
 dhd_dpc_thread(void *data)
 {
@@ -1260,6 +1360,12 @@ dhd_dpc_thread(void *data)
 
 	/* Run until signal received */
 	while (1) {
+                //HTC_CSP_START
+                if(prev_wlan_ioprio_idle != wlan_ioprio_idle){
+                    set_wlan_ioprio();
+                    prev_wlan_ioprio_idle = wlan_ioprio_idle;
+                }
+                //HTC_CSP_END
 		if (down_interruptible(&dhd->dpc_sem) == 0) {
 			/* Call bus dpc unless it indicated down (then clean stop) */
 			if (dhd->pub.busstate != DHD_BUS_DOWN) {
@@ -1277,7 +1383,7 @@ dhd_dpc_thread(void *data)
 		else
 			break;
 	}
-
+	myprintf("%s exit\n", __func__);
 	complete_and_exit(&dhd->dpc_exited, 0);
 }
 
@@ -1525,6 +1631,17 @@ dhd_ioctl_entry(struct net_device *net, struct ifreq *ifr, int cmd)
 	int ifidx;
 	bool is_set_key_cmd;
 
+	if (module_remove) {
+		DHD_ERROR(("%s: module removed. cmd 0x%04x\n", __FUNCTION__, cmd));
+		return -1;
+	}
+
+	/* BRCM: anthoy, add for debug, reject if down */
+	if ( !dhd->pub.up || (dhd->pub.busstate == DHD_BUS_DOWN)){
+		myprintf("%s: dhd is down. skip it.\n", __func__);
+		return -ENODEV;
+	}
+
 	ifidx = dhd_net2idx(dhd, net);
 	DHD_TRACE(("%s: ifidx %d, cmd 0x%04x\n", __FUNCTION__, ifidx, cmd));
 
@@ -1608,13 +1725,24 @@ dhd_ioctl_entry(struct net_device *net, struct ifreq *ifr, int cmd)
 		goto done;
 	}
 
+    //HTC_KlocWork +++
+    //For WiFi de-auth, it will send data with NULL buffer.
+    //We cannot add this check to prevent abnormal behavior
+#if 0
+    if(!ioc.buf) {
+        bcmerror = -BCME_EPERM;
+		goto done;
+    }
+#endif
+    //HTC_KlocWork ---
+
 	/* Intercept WLC_SET_KEY IOCTL - serialize M4 send and set key IOCTL to
 	 * prevent M4 encryption.
 	 */
 	is_set_key_cmd = ((ioc.cmd == WLC_SET_KEY) ||
-	                 ((ioc.cmd == WLC_SET_VAR) &&
+	                 ((ioc.cmd == WLC_SET_VAR) && (ioc.buf != NULL) && //HTC_KlocWork: add (ioc.buf != NULL) 
 	                        !(strncmp("wsec_key", ioc.buf, 9))) ||
-	                 ((ioc.cmd == WLC_SET_VAR) &&
+	                 ((ioc.cmd == WLC_SET_VAR) && (ioc.buf != NULL) && //HTC_KlocWork: add (ioc.buf != NULL)
 	                        !(strncmp("bsscfg:wsec_key", ioc.buf, 15))));
 	if (is_set_key_cmd) {
 		dhd_wait_pend8021x(net);
@@ -1666,12 +1794,23 @@ dhd_open(struct net_device *net)
 #endif
 	int ifidx;
 
+	if (module_remove) {
+		DHD_ERROR(("%s: module removed. Just return.\n", __FUNCTION__));
+		return -1;
+	}
+
 	wl_control_wl_start(net);  /* start if needed */
 
 	ifidx = dhd_net2idx(dhd, net);
 	DHD_TRACE(("%s: ifidx %d\n", __FUNCTION__, ifidx));
 
-	ASSERT(ifidx == 0);
+#ifdef HTC_KlocWork
+    if(ifidx < 0) {
+        DHD_ERROR(("[HTCKW] %s: ifidx %d < 0\n", __FUNCTION__, ifidx));
+        return -1;
+    }
+#endif
+	ASSERT(ifidx >= 0);
 
 	atomic_set(&dhd->pend_8021x_cnt, 0);
 
@@ -1806,9 +1945,17 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 		strncpy(net->name, iface_name, IFNAMSIZ);
 		net->name[IFNAMSIZ - 1] = 0;
 		len = strlen(net->name);
-		ch = net->name[len - 1];
-		if ((ch > '9' || ch < '0') && (len < IFNAMSIZ - 2))
-			strcat(net->name, "%d");
+#ifdef HTC_KlocWork
+        if(len > 0) {
+            ch = net->name[len - 1];
+            if ((ch > '9' || ch < '0') && (len < IFNAMSIZ - 2))
+                strcat(net->name, "%d");
+        }
+#else
+        ch = net->name[len - 1];
+        if ((ch > '9' || ch < '0') && (len < IFNAMSIZ - 2))
+            strcat(net->name, "%d");
+#endif
 	}
 
 	if (dhd_add_if(dhd, 0, (void *)net, net->name, NULL, 0, 0) == DHD_BAD_IF)
@@ -2289,6 +2436,8 @@ dhd_module_init(void)
 		goto fail_2;
 	}
 #endif
+	module_insert = 1;
+    printk(KERN_INFO "[ATS][press_widget][launch]\n"); //For Auto Test System log parsing
 	return error;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27))
 fail_2:
@@ -2306,6 +2455,10 @@ fail_0:
 	return error;
 }
 
+#ifdef CONFIG_MACH_INCREDIBLEC
+extern struct perf_lock wlan_perf_lock;
+#endif
+
 /* work-around for stop the wlc_ioctl early. */
 extern void disable_dev_wlc_ioctl(void);
 
@@ -2315,7 +2468,9 @@ dhd_module_cleanup(void)
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
 	disable_dev_wlc_ioctl();
-	printk(KERN_INFO "%s: bcm4329 module remove\n", __func__);
+	module_remove = 1;
+	module_insert = 0;
+	DHD_DEFAULT((KERN_INFO "%s: bcm4329 module remove\n", __func__));
 #if 0
 	htc_linux_periodic_wakeup_stop();
 	htc_linux_periodic_wakeup_exit();
@@ -2324,8 +2479,16 @@ dhd_module_cleanup(void)
 #if defined(CUSTOMER_HW2) && defined(CONFIG_WIFI_CONTROL_FUNC)
 	wifi_del_dev();
 #endif
+
+#ifdef CONFIG_MACH_INCREDIBLEC
+    if (is_perf_lock_active(&wlan_perf_lock))
+        perf_unlock(&wlan_perf_lock);
+#endif
+
 	/* Call customer gpio to turn off power with WL_REG_ON signal */
 	dhd_customer_gpio_wlan_ctrl(WLAN_POWER_OFF);
+
+    printk(KERN_INFO "[ATS][press_widget][turn_off]\n"); //For Auto Test System log parsing
 }
 
 
@@ -2417,6 +2580,11 @@ dhd_os_wd_timer(void *bus, uint wdtick)
 	dhd_pub_t *pub = bus;
 	dhd_info_t *dhd = (dhd_info_t *)pub->info;
 	static uint save_dhd_watchdog_ms = 0;
+
+	/* BRCM: anthony: stop timer, if bus down. */
+	if (pub->busstate == DHD_BUS_DOWN) {
+		return;
+	}
 
 	/* Totally stop the timer */
 	if (!wdtick && dhd->wd_timer_valid == TRUE) {
@@ -2649,7 +2817,7 @@ dhd_dev_reset(struct net_device *dev, uint8 flag)
 	if (!flag)
 		dhd_os_wd_timer(&dhd->pub, dhd_watchdog_ms);
 
-	DHD_ERROR(("%s:  WLAN OFF DONE\n", __FUNCTION__));
+	DHD_DEFAULT(("%s:  WLAN OFF DONE\n", __FUNCTION__));
 
 	return 1;
 }
@@ -2817,3 +2985,43 @@ int net_os_wake_unlock(struct net_device *dev)
 		ret = dhd_os_wake_unlock(&dhd->pub);
 	return ret;
 }
+
+#ifdef CONFIG_MACH_INCREDIBLEC
+int dhd_get_txrx_stats(struct net_device *net, unsigned long *rx_packets, unsigned long *tx_packets)
+{
+	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(net);
+	dhd_pub_t *dhdp;
+
+	if (!dhd)
+		return -1;
+
+	dhdp = &dhd->pub;
+
+	if (!dhdp)
+		return -1;
+
+	*rx_packets = dhdp->rx_packets;
+	*tx_packets = dhdp->tx_packets;
+
+	return 0;
+}
+#endif
+
+//HTC_CSP_START
+int net_os_send_rssilow_message(struct net_device *dev)
+{
+        dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
+        int ret = 0;
+
+        if (module_remove) {
+                myprintf("%s: module removed. Do not send rssi_low event.\n", __FUNCTION__);
+                return ret;
+        }
+
+        if (dhd) {
+                ret = wl_iw_send_priv_event(dev, "RSSI_LOW_IND");
+        }
+        return ret;
+}
+//HTC_CSP_END
+

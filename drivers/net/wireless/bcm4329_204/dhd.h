@@ -413,6 +413,7 @@ enum dhdhtc_pwr_ctrl{
 	DHDHTC_POWER_CTRL_BROWSER_LOAD_PAGE,
 	DHDHTC_POWER_CTRL_USER_CONFIG,
 	DHDHTC_POWER_CTRL_WIFI_PHONE,
+	DHDHTC_POWER_CTRL_FOTA_DOWNLOADING,
 	DHDHTC_POWER_CTRL_MAX_NUM,
 };
 extern int dhdhtc_update_wifi_power_mode(int is_screen_off);
@@ -420,5 +421,17 @@ extern int dhdhtc_set_power_control(int power_mode, unsigned int reason);
 extern unsigned int dhdhtc_get_cur_pwr_ctrl(void);
 extern int dhdhtc_update_dtim_listen_interval(int is_screen_off);
 
+#ifdef MMC_RECOVER
+void dhdsdio_set_mmc_recover(int set);
+#endif
+
+#ifdef CONFIG_MACH_INCREDIBLEC
+extern int dhd_get_txrx_stats(struct net_device *net, unsigned long *rx_packets, unsigned long *tx_packets);
+#endif
+
+//HTC_CSP_START
+extern int wl_iw_send_priv_event(struct net_device *dev, char *flag);
+extern int net_os_send_rssilow_message(struct net_device *dev);
+//HTC_CSP_END
 
 #endif /* _dhd_h_ */

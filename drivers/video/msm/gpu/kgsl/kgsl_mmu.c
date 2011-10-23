@@ -19,6 +19,7 @@
 #include <linux/types.h>
 #include <linux/spinlock.h>
 #include <linux/genalloc.h>
+#include <linux/slab.h>
 
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>

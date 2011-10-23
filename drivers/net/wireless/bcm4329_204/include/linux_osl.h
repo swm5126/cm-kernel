@@ -141,11 +141,20 @@ extern void osl_dma_unmap(osl_t *osh, uint pa, uint size, int direction);
 	mmap_op : bus_op
 
 
+#ifndef myerrprintf
+#define	myerrprintf(fmt, args...)	printk(KERN_WARNING "[WLAN][ERR] "fmt, ## args)
+#endif 
 
+#ifndef mywrnprintf
+#define	mywrnprintf(fmt, args...)	printk(KERN_WARNING "[WLAN][WRN] "fmt, ## args)
+#endif 
 
 #ifndef myprintf
-#define	myprintf(fmt, args...)	printk("wlan: "fmt, ## args)
+#define	myprintf(fmt, args...)	printk(KERN_INFO "[WLAN] "fmt, ## args)
 #endif 
+
+#define HTC_KERNEL_FEEDBACK(x) myerrprintf x
+
 #include <linux/kernel.h>
 #include <linux/string.h>
 

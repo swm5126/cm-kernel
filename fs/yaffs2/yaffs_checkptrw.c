@@ -18,7 +18,7 @@ const char *yaffs_checkptrw_c_version =
 #include "yaffs_checkptrw.h"
 #include "yaffs_getblockinfo.h"
 
-static int yaffs_CheckpointSpaceOk(yaffs_Device *dev)
+static int yaffs_CheckpointSpaceOk(yaffs_Device * dev)
 {
 	int blocksAvailable = dev->nErasedBlocks - dev->nReservedBlocks;
 
@@ -30,7 +30,7 @@ static int yaffs_CheckpointSpaceOk(yaffs_Device *dev)
 }
 
 
-static int yaffs_CheckpointErase(yaffs_Device *dev)
+static int yaffs_CheckpointErase(yaffs_Device * dev)
 {
 	int i;
 

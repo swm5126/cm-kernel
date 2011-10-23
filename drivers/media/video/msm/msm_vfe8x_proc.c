@@ -366,7 +366,8 @@ static void vfe_write_lens_roll_off_table(struct vfe_cmd_roll_off_config *in)
 		writel(data, ctrl->vfebase + VFE_DMI_DATA_LO);
 
 		data = (((uint32_t) (*initB)) & 0x0000FFFF) |
-		    (((uint32_t) (*initGr)) << 16);
+		/* 20101011: fix mesh LSC */
+		    (((uint32_t) (*initGb)) << 16);
 		initB++;
 		initGb++;
 
@@ -379,13 +380,17 @@ static void vfe_write_lens_roll_off_table(struct vfe_cmd_roll_off_config *in)
 
 	/* pack and write delta table */
 	for (i = 0; i < VFE_ROLL_OFF_DELTA_TABLE_SIZE; i++) {
-		data = *pDeltaR | (*pDeltaGr << 16);
+		/* 20101011: fix mesh LSC */
+		data = (((int32_t)(*pDeltaR)) & 0x0000FFFF) |
+			(((int32_t)(*pDeltaGr))<<16);
 		pDeltaR++;
 		pDeltaGr++;
 
 		writel(data, ctrl->vfebase + VFE_DMI_DATA_LO);
+		/* 20101011: fix mesh LSC */
+		data = (((int32_t)(*pDeltaB)) & 0x0000FFFF) |
+			(((int32_t)(*pDeltaGb))<<16);
 
-		data = *pDeltaB | (*pDeltaGb << 16);
 		pDeltaB++;
 		pDeltaGb++;
 
@@ -771,13 +776,15 @@ static void vfe_proc_ops(enum VFE_MESSAGE_ID id, void *data)
 {
 	struct msm_vfe_resp *rp;
 	struct vfe_message *msg;
+#if 0
 	struct msm_sync *sync = (struct msm_sync *)ctrl->syncdata;
+#endif
 
 	CDBG("ctrl->vfeOperationMode = %d, msgId = %d\n",
 	     ctrl->vfeOperationMode, id);
 
 	if (id >= ARRAY_SIZE(vfe_funcs) || vfe_funcs[id].fn == invalid) {
-		pr_err("%s: invalid VFE message id %d\n", __func__, id);
+		pr_err("[CAM]%s: invalid VFE message id %d\n", __func__, id);
 		return;
 	}
 
@@ -803,7 +810,7 @@ static void vfe_proc_ops(enum VFE_MESSAGE_ID id, void *data)
 					ctrl->syncdata,
 					GFP_ATOMIC);
 	if (!rp) {
-		pr_err("%s: out of memory\n", __func__);
+		pr_err("[CAM]%s: out of memory\n", __func__);
 		return;
 	}
 
@@ -839,13 +846,13 @@ static void vfe_proc_ops(enum VFE_MESSAGE_ID id, void *data)
 		rp->evt_msg.len = sizeof(*msg);
 
 		if (msg == NULL) {
-			pr_err("%s dsp send msg with NULL pointer\n",
+			pr_err("[CAM]%s dsp send msg with NULL pointer\n",
 				__func__);
 			return ;
 		}
 		msg->_d = id;
 		if (vfe_funcs[id].fn(rp, msg, data) == FALSE) {
-			pr_info("%s: freeing memory: handler for %d "
+			pr_info("[CAM]%s: freeing memory: handler for %d "
 				"returned false\n", __func__, id);
 			ctrl->resp->vfe_free(rp);
 			return;
@@ -900,7 +907,7 @@ static void vfe_process_error_irq(struct isr_queue_cmd *qcmd)
 		vfe_proc_ops(VFE_MSG_ID_CAMIF_OVERFLOW, qcmd);
 
 	if (irqstatus->violationIrq)
-		pr_err("%s: violation irq\n", __func__);
+		pr_err("[CAM]%s: violation irq\n", __func__);
 }
 
 /* We use epoch1 interrupt to control flash timing. The purpose is to reduce the
@@ -915,7 +922,7 @@ static void vfe_process_error_irq(struct isr_queue_cmd *qcmd)
 static void vfe_process_camif_epoch1_irq(void)
 {
 	/* Turn on the flash. */
-	struct msm_sync *sync = (struct msm_sync *)ctrl->syncdata;
+	/* struct msm_sync *sync = (struct msm_sync *)ctrl->syncdata; */
 	/*remove google flashlight*/
 	/*ctrl->resp->flash_ctrl(sync, MSM_CAMERA_LED_HIGH);*/
 
@@ -1147,9 +1154,11 @@ static inline void vfe_read_irq_status(struct vfe_irq_thread_msg *out)
 
 	temp = (uint32_t *) (ctrl->vfebase + VFE_IRQ_STATUS);
 	out->vfeIrqStatus = readl(temp);
+	CDBG("vfeIrqStatus  = 0x%x\n", out->vfeIrqStatus);
 
 	temp = (uint32_t *) (ctrl->vfebase + CAMIF_STATUS);
 	out->camifStatus = readl(temp);
+	CDBG("camifStatus  = 0x%x\n", out->camifStatus);
 #if 0				/*this for YUV performance tuning */
 	writel(0x7, ctrl->vfebase + CAMIF_COMMAND);
 	writel(0x3, ctrl->vfebase + CAMIF_COMMAND);
@@ -1233,8 +1242,20 @@ vfe_parse_interrupt_status(struct vfe_interrupt_status *ret, uint32_t irqStatusI
 	    ret->awbPingpongIrq ||
 	    ret->afPingpongIrq ||
 	    ret->busOverflowIrq || ret->axiErrorIrq || ret->violationIrq;
-
 	ret->anyErrorIrqs = temp;
+	CDBG("ret->anyErrorIrqs %X\n", ret->anyErrorIrqs);
+
+	if (ret->anyErrorIrqs) {
+	CDBG("ret->camifErrorIrq %d\n", ret->camifErrorIrq);
+	CDBG("ret->camifOverflowIrq %d\n", ret->camifOverflowIrq);
+	CDBG("ret->afOverflowIrq %d\n", ret->afOverflowIrq);
+	CDBG("ret->awbOverflowIrq %d\n", ret->awbOverflowIrq);
+	CDBG("ret->awbPingpongIrq %d\n", ret->awbPingpongIrq);
+	CDBG("ret->afPingpongIrq %d\n", ret->afPingpongIrq);
+	CDBG("ret->busOverflowIrq %d\n", ret->busOverflowIrq);
+	CDBG("ret->axiErrorIrq %d\n", ret->axiErrorIrq);
+	CDBG("ret->violationIrq %d\n", ret->violationIrq);
+	}
 
 	/* logic OR of any output path bits */
 	temp = ret->encYPingpongIrq || ret->encCbcrPingpongIrq || ret->encIrq;
@@ -1772,7 +1793,7 @@ static void vfe_process_output_path_irq(struct vfe_interrupt_status *irqstatus)
 								      encPath);
 
 		} else {
-			CDBG("horng irqstatus->encIrq = %x\n", irqstatus->encIrq);
+			CDBG("irqstatus->encIrq = %x\n", irqstatus->encIrq);
 			if (irqstatus->encIrq)
 				vfe_process_frame_done_irq_no_frag(&ctrl->
 								   encPath);
@@ -1786,12 +1807,15 @@ static void vfe_process_output_path_irq(struct vfe_interrupt_status *irqstatus)
 			ctrl->vstate = VFE_STATE_IDLE;
 
 			vfe_proc_ops(VFE_MSG_ID_SNAPSHOT_DONE, NULL);
+			vfe_camif_stop_immediately();
 			vfe_prog_hw_testgen_cmd(VFE_TEST_GEN_STOP);
 			vfe_pm_stop();
 		}
 	}
 }
 
+static int preview_skipframe;
+#define FRAME_SKIP 2
 static void __vfe_do_tasklet(struct isr_queue_cmd *qcmd)
 {
 	if (qcmd->vfeInterruptStatus.regUpdateIrq) {
@@ -1801,6 +1825,7 @@ static void __vfe_do_tasklet(struct isr_queue_cmd *qcmd)
 
 	if (qcmd->vfeInterruptStatus.resetAckIrq) {
 		CDBG("%s: process resetAckIrq\n", __func__);
+		preview_skipframe = 0;
 		vfe_process_reset_irq();
 	}
 
@@ -1819,7 +1844,11 @@ static void __vfe_do_tasklet(struct isr_queue_cmd *qcmd)
 	/* next, check output path related interrupts. */
 	if (qcmd->vfeInterruptStatus.anyOutputPathIrqs) {
 		CDBG("irq: anyOutputPathIrqs\n");
-		vfe_process_output_path_irq(&qcmd->vfeInterruptStatus);
+		if(preview_skipframe > FRAME_SKIP ||
+			ctrl->vfeOperationMode == VFE_START_OPERATION_MODE_SNAPSHOT)
+			vfe_process_output_path_irq(&qcmd->vfeInterruptStatus);
+		else
+			preview_skipframe ++;
 	}
 
 	if (qcmd->vfeInterruptStatus.afPingpongIrq)
@@ -1851,7 +1880,7 @@ static struct isr_queue_cmd *get_irq_cmd_nosync(void)
 	int old_get = ctrl->irq_get++;
 	ctrl->irq_get = ctrl->irq_get % ARRAY_SIZE(ctrl->irqs);
 	if (ctrl->irq_get == ctrl->irq_put) {
-		pr_err("%s: out of irq command packets\n", __func__);
+		pr_err("[CAM]%s: out of irq command packets\n", __func__);
 		ctrl->irq_get = old_get;
 		return NULL;
 	}
@@ -1903,7 +1932,7 @@ static void vfe_do_tasklet(unsigned long data)
 	}
 
 	if (cnt > 1)
-		pr_info("%s: serviced %d vfe interrupts\n", __func__, cnt);
+		pr_info("[CAM]%s: serviced %d vfe interrupts\n", __func__, cnt);
 }
 
 DECLARE_TASKLET(vfe_tasklet, vfe_do_tasklet, 0);
@@ -1965,26 +1994,26 @@ int vfe_cmd_init(struct msm_vfe_callback *presp,
 
 	vfemem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!vfemem) {
-		pr_err("%s: no mem resource\n", __func__);
+		pr_err("[CAM]%s: no mem resource\n", __func__);
 		return -ENODEV;
 	}
 
 	vfeirq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!vfeirq) {
-		pr_err("%s: no irq resource\n", __func__);
+		pr_err("[CAM]%s: no irq resource\n", __func__);
 		return -ENODEV;
 	}
 
 	vfeio = request_mem_region(vfemem->start,
 				   resource_size(vfemem), pdev->name);
 	if (!vfeio) {
-		pr_err("%s: VFE region already claimed\n", __func__);
+		pr_err("[CAM]%s: VFE region already claimed\n", __func__);
 		return -EBUSY;
 	}
 
 	ctrl = kzalloc(sizeof(struct msm_vfe8x_ctrl), GFP_KERNEL);
 	if (!ctrl) {
-		pr_err("%s: out of memory\n", __func__);
+		pr_err("[CAM]%s: out of memory\n", __func__);
 		rc = -ENOMEM;
 		goto cmd_init_failed1;
 	}
@@ -1996,7 +2025,7 @@ int vfe_cmd_init(struct msm_vfe_callback *presp,
 	ctrl->vfebase =
 	    ioremap(vfemem->start, (vfemem->end - vfemem->start) + 1);
 	if (!ctrl->vfebase) {
-		pr_err("%s: ioremap failed\n", __func__);
+		pr_err("[CAM]%s: ioremap failed\n", __func__);
 		rc = -ENOMEM;
 		goto cmd_init_failed2;
 	}
@@ -2004,14 +2033,14 @@ int vfe_cmd_init(struct msm_vfe_callback *presp,
 	rc = request_irq(ctrl->vfeirq, vfe_parse_irq,
 			 IRQF_TRIGGER_RISING, "vfe", 0);
 	if (rc < 0) {
-		pr_err("%s: request_irq(%d) failed\n", __func__, ctrl->vfeirq);
+		pr_err("[CAM]%s: request_irq(%d) failed\n", __func__, ctrl->vfeirq);
 		goto cmd_init_failed2;
 	}
 
 	if (presp && presp->vfe_resp)
 		ctrl->resp = presp;
 	else {
-		pr_err("%s: no vfe_resp function\n", __func__);
+		pr_err("[CAM]%s: no vfe_resp function\n", __func__);
 		rc = -EIO;
 		goto cmd_init_failed3;
 	}
@@ -2041,7 +2070,7 @@ void vfe_cmd_release(struct platform_device *dev)
 	iounmap(ctrl->vfebase);
 	mem = platform_get_resource(dev, IORESOURCE_MEM, 0);
 	if (mem == NULL) {
-		pr_err("%s : platform get resource is NULL pointer\n",
+		pr_err("[CAM]%s : platform get resource is NULL pointer\n",
 			__func__);
 	} else
 		release_mem_region(mem->start, (mem->end - mem->start) + 1);
@@ -2082,7 +2111,7 @@ void vfe_stop(void)
 		spin_cnt++;
 	} while (!(vfeAxiStauts & AXI_STATUS_BUSY_MASK));
 	if (spin_cnt > 1)
-		pr_warning("%s: spin_cnt %d\n", __func__, spin_cnt);
+		pr_warning("[CAM]%s: spin_cnt %d\n", __func__, spin_cnt);
 
 	vfe_program_axi_cmd(AXI_HALT_CLEAR);
 
@@ -2189,7 +2218,7 @@ int vfe_rgb_gamma_update(struct vfe_cmd_rgb_gamma_config *in)
 		break;
 
 	default:
-		pr_err("%s: invalid gamma channel %d\n", __func__, in->channelSelect);
+		pr_err("[CAM]%s: invalid gamma channel %d\n", __func__, in->channelSelect);
 		return -EINVAL;
 	}			/* switch */
 
@@ -2240,7 +2269,7 @@ int vfe_rgb_gamma_config(struct vfe_cmd_rgb_gamma_config *in)
 		break;
 
 	default:
-		pr_err("%s: invalid gamma channel %d\n", __func__, in->channelSelect);
+		pr_err("[CAM]%s: invalid gamma channel %d\n", __func__, in->channelSelect);
 		rc = -EINVAL;
 		break;
 	}			/* switch */
@@ -2371,7 +2400,7 @@ void vfe_start(struct vfe_cmd_start *in)
 	uint32_t demperiod = 0;
 	uint32_t demeven = 0;
 	uint32_t demodd = 0;
-
+	uint32_t ping_addr = 0, pong_addr = 0;
 	/* derived from other commands.  (camif config, axi output config,
 	 * etc)
 	 */
@@ -2574,7 +2603,9 @@ void vfe_start(struct vfe_cmd_start *in)
 	if (ctrl->axiOutputMode == VFE_AXI_OUTPUT_MODE_CAMIFToAXIViaOutput2) {
 		/* raw dump mode */
 		rawmode = TRUE;
-
+		ping_addr = readl(ctrl->vfebase + VFE_BUS_ENC_Y_WR_PING_ADDR);
+		pong_addr = readl(ctrl->vfebase + VFE_BUS_ENC_Y_WR_PONG_ADDR);
+		writel(ping_addr, ctrl->vfebase + VFE_BUS_ENC_Y_WR_PONG_ADDR);
 		while (rawmode) {
 			pmstatus =
 			    readl(ctrl->vfebase +

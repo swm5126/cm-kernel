@@ -4,6 +4,7 @@
  *  Copyright (C) 1996,1997,1998 Russell King.
  *  ARM700 fix by Matthew Godbolt (linux-user@willothewisp.demon.co.uk)
  *  nommu support by Hyok S. Choi (hyok.choi@samsung.com)
+ *  Copyright (c) 2009, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -162,8 +163,6 @@ ENDPROC(__und_invalid)
 	@  r4 - orig_r0 (see pt_regs definition in ptrace.h)
 	@
 	stmia	r5, {r0 - r4}
-
-	asm_trace_hardirqs_off
 	.endm
 
 	.align	5
@@ -204,7 +203,7 @@ __dabt_svc:
 	@
 	@ IRQs off again before pulling preserved data off the stack
 	@
-	disable_irq
+	disable_irq_notrace
 
 	@
 	@ restore SPSR and restart the instruction
@@ -218,6 +217,9 @@ ENDPROC(__dabt_svc)
 __irq_svc:
 	svc_entry
 
+#ifdef CONFIG_TRACE_IRQFLAGS
+	bl	trace_hardirqs_off
+#endif
 #ifdef CONFIG_PREEMPT
 	get_thread_info tsk
 	ldr	r8, [tsk, #TI_PREEMPT]		@ get preempt count
@@ -291,7 +293,7 @@ __und_svc:
 	@
 	@ IRQs off again before pulling preserved data off the stack
 	@
-1:	disable_irq
+1:	disable_irq_notrace
 
 	@
 	@ restore SPSR and restart the instruction
@@ -327,7 +329,7 @@ __pabt_svc:
 	@
 	@ IRQs off again before pulling preserved data off the stack
 	@
-	disable_irq
+	disable_irq_notrace
 
 	@
 	@ restore SPSR and restart the instruction
@@ -393,8 +395,6 @@ ENDPROC(__pabt_svc)
 	@ Clear FP to mark the first stack frame
 	@
 	zero_fp
-
-	asm_trace_hardirqs_off
 	.endm
 
 	.macro	kuser_cmpxchg_check
@@ -465,9 +465,6 @@ __irq_usr:
  THUMB(	movne	r0, #0		)
  THUMB(	strne	r0, [r0]	)
 #endif
-#ifdef CONFIG_TRACE_IRQFLAGS
-	bl	trace_hardirqs_on
-#endif
 
 	mov	why, #0
 	b	ret_to_user
@@ -509,7 +506,8 @@ __und_usr:
 	blo	__und_usr_unknown
 3:	ldrht	r0, [r4]
 	add	r2, r2, #2			@ r2 is PC + 2, make it PC + 4
-	orr	r0, r0, r5, lsl #16
+	str    	r2, [sp, #S_PC]			@ it's a 2x16bit instr, update
+	orr    	r0, r0, r5, lsl #16		@  regs->ARM_pc
 #else
 	b	__und_usr_unknown
 #endif
@@ -523,16 +521,16 @@ ENDPROC(__und_usr)
 /*
  * The out of line fixup for the ldrt above.
  */
-	.section .fixup, "ax"
+	.pushsection .fixup, "ax"
 4:	mov	pc, r9
-	.previous
-	.section __ex_table,"a"
+	.popsection
+	.pushsection __ex_table,"a"
 	.long	1b, 4b
 #if __LINUX_ARM_ARCH__ >= 7
 	.long	2b, 4b
 	.long	3b, 4b
 #endif
-	.previous
+	.popsection
 
 /*
  * Check whether the instruction is a co-processor instruction.
@@ -676,10 +674,10 @@ do_fpe:
  *  lr  = unrecognised FP instruction return address
  */
 
-	.data
+	.pushsection .data
 ENTRY(fp_enter)
 	.word	no_fp
-	.previous
+	.popsection
 
 ENTRY(no_fp)
 	mov	pc, lr
@@ -747,7 +745,14 @@ ENTRY(__switch_to)
 	str	r3, [r4, #-15]			@ TLS val at 0xffff0ff0
 //#endif
 #ifdef CONFIG_MMU
+#ifdef CONFIG_EMULATE_DOMAIN_MANAGER_V7
+	stmdb	r13!, {r0-r3, lr}
+	mov	r0, r6
+	bl	emulate_domain_manager_set
+	ldmia	r13!, {r0-r3, lr}
+#else
 	mcr	p15, 0, r6, c3, c0, 0		@ Set domain register
+#endif
 #endif
 	mov	r5, r0
 	add	r4, r2, #TI_CPU_SAVE
@@ -958,9 +963,7 @@ kuser_cmpxchg_fixup:
 
 #else
 
-#ifdef CONFIG_SMP
-	mcr	p15, 0, r0, c7, c10, 5	@ dmb
-#endif
+	smp_dmb
 1:	ldrex	r3, [r2]
 	subs	r3, r3, r0
 	strexeq	r3, r1, [r2]

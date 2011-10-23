@@ -214,7 +214,6 @@ struct venc_buffer {
 	long long time_stamp;
 	unsigned int flags;
 	unsigned int client_data;
-
 };
 
 struct venc_buffers {
@@ -231,7 +230,6 @@ struct venc_buffer_flush {
 union venc_msg_data {
 	struct venc_buffer buf;
 	struct venc_buffer_flush flush_ret;
-
 };
 
 struct venc_msg {

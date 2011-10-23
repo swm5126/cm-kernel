@@ -25,6 +25,7 @@ struct cpu_usage_stat {
 	cputime64_t iowait;
 	cputime64_t steal;
 	cputime64_t guest;
+	cputime64_t guest_nice;
 };
 
 struct kernel_stat {
@@ -66,7 +67,15 @@ extern unsigned int kstat_irqs_cpu(unsigned int irq, int cpu);
 	((DESC)->kstat_irqs[smp_processor_id()])
 #define kstat_incr_irqs_this_cpu(irqno, DESC) \
 	((DESC)->kstat_irqs[smp_processor_id()]++)
+#endif
 
+#ifdef CONFIG_ARCH_MSM8X60
+#define update_handle_irqs_this_cpu(irqno) \
+	(handle_irq[smp_processor_id()].S_irq = irqno); \
+	mb()
+#define release_handle_irqs_this_cpu(irqno) \
+	(handle_irq[smp_processor_id()].L_irq = irqno); \
+	mb()
 #endif
 
 static inline void kstat_incr_softirqs_this_cpu(unsigned int irq)

@@ -117,7 +117,7 @@
 #define MSM_VFE_SIZE          SZ_1M
 
 #define MSM_UART1DM_PHYS      0xA0200000
-#define MSM_UART2DM_PHYS      0xA0300000
+#define MSM_UART2DM_PHYS      0xA0900000
 
 #define MSM_SIRC_BASE         IOMEM(0xF8006000)
 #define MSM_SIRC_PHYS         0xAC200000
@@ -142,4 +142,9 @@
 #define MSM_TCSR_BASE  IOMEM(0xF8008000)
 #define MSM_TCSR_PHYS  0xA8700000
 #define MSM_TCSR_SIZE  SZ_4K
+
+#ifdef CONFIG_BUILD_CIQ
+#define SMD_CIQ_BASE		0xFC11C
+#endif
+
 #endif

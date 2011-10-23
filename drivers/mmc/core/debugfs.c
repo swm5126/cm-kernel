@@ -10,6 +10,7 @@
 #include <linux/debugfs.h>
 #include <linux/fs.h>
 #include <linux/seq_file.h>
+#include <linux/slab.h>
 #include <linux/stat.h>
 
 #include <linux/mmc/card.h>
@@ -221,7 +222,8 @@ static int mmc_ext_csd_open(struct inode *inode, struct file *filp)
 
 out_free:
 	kfree(buf);
-	kfree(ext_csd);
+	if (ext_csd)
+		kfree(ext_csd);
 	return err;
 }
 

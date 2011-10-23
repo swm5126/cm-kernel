@@ -31,6 +31,7 @@
 #include <linux/highmem.h>
 #include <linux/vmalloc.h>
 #include <asm/cacheflush.h>
+#include <linux/delay.h>
 
 #include <asm/atomic.h>
 
@@ -193,6 +194,7 @@ static void kgsl_hw_put_locked(bool start_timer)
 
 static void kgsl_do_standby_timer(unsigned long data)
 {
+	mdelay(1);
 	if (kgsl_yamato_is_idle(&kgsl_driver.yamato_device))
 		kgsl_hw_disable();
 	else
@@ -748,7 +750,7 @@ static int kgsl_ioctl_sharedmem_from_vmalloc(struct kgsl_file_private *private,
 		 * overwrite this memory */
 		dmac_flush_range(vmalloc_area, vmalloc_area + len);
 		KGSL_MEM_INFO("Caching for memory allocation turned off\n");
-		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 	} else {
 		KGSL_MEM_INFO("Caching for memory allocation turned on\n");
 	}

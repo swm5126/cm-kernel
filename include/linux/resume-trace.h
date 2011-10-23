@@ -10,6 +10,7 @@ enum {
 	TRACE_DPM_RESUME_NOIRQ = 1U << 5,
 	TRACE_DPM_RESUME = 1U << 6,
 	TRACE_DPM_COMPLETE = 1U << 7,
+	TRACE_PM_WARN = 1U << 8,
 };
 
 #ifdef CONFIG_PM_TRACE
@@ -17,6 +18,11 @@ enum {
 
 extern int pm_trace_enabled;
 extern int pm_trace_mask;
+
+static inline int pm_trace_is_enabled(void)
+{
+       return pm_trace_enabled;
+}
 
 struct device;
 extern void set_trace_device(struct device *);
@@ -37,6 +43,8 @@ extern void generate_resume_trace(const void *tracedata, unsigned int user);
 	} while(0)
 
 #else
+
+static inline int pm_trace_is_enabled(void) { return 0; }
 
 #define TRACE_DEVICE(dev) do { } while (0)
 #define TRACE_RESUME(dev) do { } while (0)

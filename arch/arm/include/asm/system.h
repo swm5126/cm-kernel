@@ -60,7 +60,11 @@
 #include <linux/linkage.h>
 #include <linux/irqflags.h>
 
+#include <asm/outercache.h>
+
 #define __exception	__attribute__((section(".exception.text")))
+
+void cpu_idle_wait(void);
 
 struct thread_info;
 struct task_struct;
@@ -72,13 +76,10 @@ extern unsigned int system_serial_high;
 extern unsigned int mem_fclk_21285;
 extern char microp_ver[4];
 extern unsigned int als_kadc;
-extern unsigned int ps_kparam1;
-extern unsigned int ps_kparam2;
 
 struct pt_regs;
 
-void die(const char *msg, struct pt_regs *regs, int err)
-		__attribute__((noreturn));
+void die(const char *msg, struct pt_regs *regs, int err);
 
 struct siginfo;
 void arm_notify_die(const char *str, struct pt_regs *regs, struct siginfo *info,
@@ -127,9 +128,8 @@ extern unsigned int user_debug;
 				    : : "r" (0) : "memory")
 #define dsb() __asm__ __volatile__ ("mcr p15, 0, %0, c7, c10, 4" \
 				    : : "r" (0) : "memory")
-#define dmb() do { __asm__ __volatile__ ("mcr p15, 0, %0, c7, c10, 5" \
-				    : : "r" (0) : "memory"); \
-		arch_barrier_extra(); } while (0)
+#define dmb() __asm__ __volatile__ ("mcr p15, 0, %0, c7, c10, 5" \
+				: : "r" (0) : "memory")
 #elif defined(CONFIG_CPU_FA526)
 #define isb() __asm__ __volatile__ ("mcr p15, 0, %0, c7, c5, 4" \
 				    : : "r" (0) : "memory")
@@ -143,21 +143,28 @@ extern unsigned int user_debug;
 #define dmb() __asm__ __volatile__ ("" : : : "memory")
 #endif
 
-#ifndef CONFIG_SMP
+#ifdef CONFIG_ARCH_HAS_BARRIERS
+#include <mach/barriers.h>
+#elif defined(CONFIG_ARM_DMA_MEM_BUFFERABLE) || defined(CONFIG_SMP)
+#define mb()		do { dsb(); outer_sync(); } while (0)
+#define rmb()		dmb()
+#define wmb()		mb()
+#else
 #define mb()	do { if (arch_is_coherent()) dmb(); else barrier(); } while (0)
 #define rmb()	do { if (arch_is_coherent()) dmb(); else barrier(); } while (0)
 #define wmb()	do { if (arch_is_coherent()) dmb(); else barrier(); } while (0)
+#endif
+
+#ifndef CONFIG_SMP
 #define smp_mb()	barrier()
 #define smp_rmb()	barrier()
 #define smp_wmb()	barrier()
 #else
-#define mb()		dmb()
-#define rmb()		dmb()
-#define wmb()		dmb()
 #define smp_mb()	dmb()
 #define smp_rmb()	dmb()
 #define smp_wmb()	dmb()
 #endif
+
 #define read_barrier_depends()		do { } while(0)
 #define smp_read_barrier_depends()	do { } while(0)
 
@@ -321,6 +328,8 @@ static inline unsigned long __xchg(unsigned long x, volatile void *ptr, int size
 
 extern void disable_hlt(void);
 extern void enable_hlt(void);
+
+void cpu_idle_wait(void);
 
 #include <asm-generic/cmpxchg-local.h>
 

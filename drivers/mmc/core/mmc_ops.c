@@ -9,6 +9,7 @@
  * your option) any later version.
  */
 
+#include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/scatterlist.h>
 
@@ -392,6 +393,7 @@ int mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value)
 	int retries = 3;
 	struct mmc_command cmd;
 	u32 status;
+	unsigned long delay = jiffies + HZ;
 
 	BUG_ON(!card);
 	BUG_ON(!card->host);
@@ -425,6 +427,11 @@ int mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value)
 			break;
 		if (mmc_host_is_spi(card->host))
 			break;
+
+		if (time_after(jiffies, delay)) {
+			printk(KERN_ERR "failed to get card ready!!!\n");
+			break;
+		}
 	} while (retries && R1_CURRENT_STATE(status) == 7);
 
 	if (mmc_host_is_spi(card->host)) {

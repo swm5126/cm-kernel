@@ -21,6 +21,7 @@
 
 #include <linux/device.h>
 #include <linux/mod_devicetable.h>
+#include <linux/slab.h>
 
 /*
  * INTERFACES between SPI master-side drivers and SPI infrastructure.
@@ -70,6 +71,7 @@ struct spi_device {
 	struct spi_master	*master;
 	u32			max_speed_hz;
 	u8			chip_select;
+	u8			ext_gpio_cs;
 	u8			mode;
 #define	SPI_CPHA	0x01			/* clock phase */
 #define	SPI_CPOL	0x02			/* clock polarity */
@@ -611,6 +613,11 @@ spi_read(struct spi_device *spi, u8 *buf, size_t len)
 extern int spi_write_then_read(struct spi_device *spi,
 		const u8 *txbuf, unsigned n_tx,
 		u8 *rxbuf, unsigned n_rx);
+
+/* HTC: to support write/read in full duplex mode */
+extern int spi_write_and_read(struct spi_device *spi,
+		u8 *txbuf, u8 *rxbuf, unsigned size);
+
 /*
  * htc workaround to support multiple clients: add mutex lock to avoid SPI commands conflict.
  * @func: true for spi write, false for spi read
@@ -737,6 +744,7 @@ struct spi_board_info {
 	 */
 	u16		bus_num;
 	u16		chip_select;
+	u16		ext_gpio_cs;
 
 	/* mode becomes spi_device.mode, and is essential for chips
 	 * where the default of SPI_CS_HIGH = 0 is wrong.

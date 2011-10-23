@@ -643,7 +643,7 @@ struct yaffs_DeviceStruct {
 
 				 */
 	void (*putSuperFunc) (struct super_block *sb);
-        struct ylist_head searchContexts;
+		struct ylist_head searchContexts;
 
 #endif
 

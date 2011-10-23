@@ -30,6 +30,7 @@
 #ifdef CONFIG_HTC_HEADSET_MGR
 #include <mach/htc_headset_mgr.h>
 #endif
+#include <mach/debug_display.h>
 
 #include "mdp_hw.h"
 #include "tv.h"
@@ -213,13 +214,13 @@ int tvenc_set_mode(int mode)
 int tvenc_off(struct msm_panel_data *panel)
 {
 	struct tvenc_info *tvenc = panel_to_tv(panel);
-	pr_info("%s\n", __func__);
+	PR_DISP_INFO("%s\n", __func__);
 
 	if (atomic_read(&tvenc->ref_count) == 0)
 		return 0;
 
 	if (atomic_dec_return(&tvenc->ref_count) == 0) {
-		pr_info("%s, do turn_off\n", __func__);
+		PR_DISP_INFO("%s, do turn_off\n", __func__);
 		TV_OUT(TV_ENC_CTL, 0);
 		clk_disable(tvenc->tvenc_clk);
 		clk_disable(tvenc->tvdac_clk);
@@ -231,7 +232,7 @@ int tvenc_off(struct msm_panel_data *panel)
 int tvenc_on(struct msm_panel_data *panel)
 {
 	struct tvenc_info *tvenc = panel_to_tv(panel);
-	pr_info("%s\n", __func__);
+	PR_DISP_INFO("%s\n", __func__);
 
 	if (atomic_inc_return(&tvenc->ref_count) == 1) {
 		clk_enable(tvenc->tvenc_clk);
@@ -246,7 +247,7 @@ int tvenc_suspend(struct msm_panel_data *panel)
 	int ret = -1;
 	struct tvenc_info *tvenc = panel_to_tv(panel);
 
-	pr_info("%s\n", __func__);
+	PR_DISP_INFO("%s\n", __func__);
 	ret = tvenc_off(panel);
 	disable_irq(tvenc->irq);
 
@@ -261,7 +262,7 @@ int tvenc_resume(struct msm_panel_data *panel)
 	int ret = -1;
 	struct tvenc_info *tvenc = panel_to_tv(panel);
 
-	pr_info("%s\n", __func__);
+	PR_DISP_INFO("%s\n", __func__);
 	ret = tvenc_on(panel);
 	enable_irq(tvenc->irq);
 	return ret;
@@ -274,7 +275,7 @@ static void tvenc_wait_vsync(struct msm_panel_data *panel)
 
 	ret = wait_event_timeout(tvenc->vsync_waitq, tvenc->got_vsync, HZ / 2);
 	if (ret == 0)
-		pr_err("%s: timeout waiting for VSYNC\n", __func__);
+		PR_DISP_ERR("%s: timeout waiting for VSYNC\n", __func__);
 	tvenc->got_vsync = 0;
 }
 
@@ -318,11 +319,9 @@ static void tvenc_dma_start(void *priv, uint32_t addr, uint32_t stride,
 static void tvenc_detect_work_func(struct work_struct *work)
 {
 	int value;
-	struct tvenc_info *tvenc= container_of(work, struct tvenc_info,
-			detect_delay_work);
 
 	value = gpio_get_value(82);
-	printk("%s, TV-detection GPIO=%d\n", __func__, value);
+	PR_DISP_WARN("%s, TV-detection GPIO=%d\n", __func__, value);
 #ifdef CONFIG_HTC_HEADSET_MGR
 	switch_send_event(BIT_TV_OUT | BIT_TV_OUT_AUDIO, !!value);
 #endif
@@ -338,7 +337,7 @@ irqreturn_t tvenc_detect_isr(int irq, void *data)
 		v1 = gpio_get_value(82);
 		set_irq_type(tvenc->irq, v1 ?
 				IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH);
-		printk("%s: set GPIO of TV-detection with TRIGGER-%s\n",
+		PR_DISP_WARN("%s: set GPIO of TV-detection with TRIGGER-%s\n",
 			__func__, v1 ? "LOW": "HIGH");
 		v2 = gpio_get_value(82);
 	} while (v1 != v2 && retry-- > 0);
@@ -374,7 +373,7 @@ static int tvenc_setup_detection(struct msm_panel_data *panel, int init)
                 goto err_get_irq_num_failed;
 
 	value = gpio_get_value(gpio);
-        printk(KERN_INFO "tv detect on gpio %d now %d\n", gpio, value);
+        PR_DISP_INFO("tv detect on gpio %d now %d\n", gpio, value);
 	ret = request_irq(irq, tvenc_detect_isr,
 			value ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH,
 			"tv-detect", panel);
@@ -396,7 +395,7 @@ err_request_gpio_failed:
 
 void tvenc_enable_amplifier(int on_off)
 {
-	pr_info("%s(%d)\n", __func__, on_off);
+	PR_DISP_INFO("%s(%d)\n", __func__, on_off);
 	/* FIXME: change the platform-dependant data to proper place */
 	gpio_set_value(109, !!on_off);
 }
@@ -408,21 +407,21 @@ static int tvenc_probe(struct platform_device *pdev)
 	struct tvenc_info *tvenc;
 	struct msm_tvenc_platform_data *pdata = pdev->dev.platform_data;
 
-	printk(KERN_INFO "%s()\n", __func__);
+	PR_DISP_INFO("%s()\n", __func__);
 	tvenc = kzalloc(sizeof(struct tvenc_info), GFP_KERNEL);
 	if (!tvenc)
 		return -ENOMEM;
 
 	tvenc->tvenc_clk = clk_get(NULL, "tv_enc_clk");
 	if (IS_ERR(tvenc->tvenc_clk)) {
-		pr_err("error: can't get tvenc_clk!\n");
+		PR_DISP_ERR("error: can't get tvenc_clk!\n");
 		ret = PTR_ERR(tvenc->tvenc_clk);
 		goto err_get_tvenc_clk;
 	}
 
 	tvenc->tvdac_clk = clk_get(NULL, "tv_dac_clk");
 	if (IS_ERR(tvenc->tvdac_clk)) {
-		pr_err("error: can't get tvdac_clk!\n");
+		PR_DISP_ERR("error: can't get tvdac_clk!\n");
 		ret = PTR_ERR(tvenc->tvdac_clk);
 		goto err_get_tvdac_clk;
 	}
@@ -457,14 +456,14 @@ static int tvenc_probe(struct platform_device *pdev)
 
 	ret = platform_device_register(&tvenc->fb_pdev);
 	if (ret) {
-		pr_err("%s: Cannot register msm_panel pdev\n", __func__);
+		PR_DISP_ERR("%s: Cannot register msm_panel pdev\n", __func__);
 		goto err_plat_dev_reg;
 	}
 
 	tvenc_base = ioremap(pdev->resource[0].start,
 			pdev->resource[0].end - pdev->resource[0].start + 1);
 	if (!tvenc_base) {
-		pr_err("tvenc_base ioremap failed!\n");
+		PR_DISP_ERR("tvenc_base ioremap failed!\n");
 		ret = -ENOMEM;
 		goto reg_ioremap_err;
 	}

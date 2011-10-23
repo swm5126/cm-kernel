@@ -16,6 +16,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/ptrace.h>
 #include <linux/timer.h>
@@ -155,6 +156,7 @@ module_param_named(debug_mask, msm_irq_debug_mask, int, S_IRUGO | S_IWUSR | S_IW
 #error "VIC_NUM_REGS set to illegal value"
 #endif
 
+static uint32_t msm_irq_smsm_wake_enable_mask;
 static uint32_t msm_irq_smsm_wake_enable[2];
 static struct {
 	uint32_t int_en[2];
@@ -368,7 +370,7 @@ void msm_irq_enter_sleep1(bool arm9_wake, int from_idle)
 {
 	if (!arm9_wake || !smsm_int_info)
 		return;
-	smsm_int_info->interrupt_mask = msm_irq_smsm_wake_enable[!from_idle];
+	smsm_int_info->interrupt_mask = msm_irq_smsm_wake_enable[!from_idle] & ~msm_irq_smsm_wake_enable_mask;
 	smsm_int_info->pending_interrupts = 0;
 }
 
@@ -677,4 +679,25 @@ void msm_fiq_exit_sleep(void)
 	if (fiq_stack)
 		fiq_glue_setup(fiq_func, fiq_data, fiq_stack + THREAD_START_SP);
 }
+
+void register_msm_irq_mask(unsigned int irq)
+{
+        uint32_t mask = 1UL << (irq & 31);
+        int smsm_irq = msm_irq_to_smsm[irq];
+
+        mask = 1UL << (smsm_irq - 1);
+        msm_irq_smsm_wake_enable_mask |= mask;
+}
+EXPORT_SYMBOL(register_msm_irq_mask);
+
+void unregister_msm_irq_mask(unsigned int irq)
+{
+        uint32_t mask = 1UL << (irq & 31);
+        int smsm_irq = msm_irq_to_smsm[irq];
+
+        mask = 1UL << (smsm_irq - 1);
+        msm_irq_smsm_wake_enable_mask &= ~mask;
+}
+EXPORT_SYMBOL(unregister_msm_irq_mask);
+
 #endif

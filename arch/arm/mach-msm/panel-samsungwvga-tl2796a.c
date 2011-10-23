@@ -91,10 +91,10 @@ static struct lcm_cmd lcm_init_666seq[] = {
 		{ 0x1D, 0xA0, 250 },
 };
 
-static struct lcm_cmd lcm_wakup_seq[] = {
-		{ 0x1d, 0xa0, 200 },
-		{ 0x14, 0x3 , 100 },
-};
+//static struct lcm_cmd lcm_wakup_seq[] = {
+//		{ 0x1d, 0xa0, 200 },
+//		{ 0x14, 0x3 , 100 },
+//};
 
 static struct lcm_cmd lcm_standby_seq[] = {
 		{0x14, 0x0, 100 },
@@ -354,9 +354,6 @@ static int lcm_write_cmd(uint32_t reg, uint32_t data)
 {
 	int ret = -1;
 
-	if (reg < 0)
-		return -EIO;
-
 	ret = qspi_send(0x0, reg);
 	if (ret)
 		goto err_lcm_writeb;
@@ -507,7 +504,7 @@ static int samsung_oled_panel_init(struct msm_lcdc_panel_ops *ops)
 	if (system_rev < 1)
 		lcm_write_tb(lcm_init_seq, ARRAY_SIZE(lcm_init_seq));
 	else
-		lcm_write_tb(lcm_init_seq, ARRAY_SIZE(lcm_init_666seq));
+		lcm_write_tb(lcm_init_666seq, ARRAY_SIZE(lcm_init_666seq));
 	gamma_table_bank_select();
 	mutex_unlock(&panel_lock);
 	wake_unlock(&panel_idle_lock);
@@ -632,7 +629,7 @@ static int __init amoled_init_panel(void)
 	return 0;
 }
 
-static int __init amoled_probe(struct platform_device *pdev)
+static int amoled_probe(struct platform_device *pdev)
 {
 	int rc = -EIO;
 	struct panel_platform_data *pdata;

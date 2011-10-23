@@ -57,6 +57,23 @@ static uint32_t wait_pending;
 
 static struct alarm alarms[ANDROID_ALARM_TYPE_COUNT];
 
+#ifdef CONFIG_BUILD_CIQ
+static int is_set_cmd(unsigned int cmd)
+{
+	if ((ANDROID_ALARM_BASE_CMD(cmd) != ANDROID_ALARM_GET_TIME(0)) &&
+	    (ANDROID_ALARM_BASE_CMD(cmd) != ANDROID_ALARM_GET_TICKS(0)))
+		return 1;
+	return 0;
+}
+#else
+static int is_set_cmd(unsigned int cmd)
+{
+	if (ANDROID_ALARM_BASE_CMD(cmd) != ANDROID_ALARM_GET_TIME(0))
+		return 1;
+	return 0;
+}
+#endif
+
 static long alarm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int rv = 0;
@@ -70,7 +87,7 @@ static long alarm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	if (alarm_type >= ANDROID_ALARM_TYPE_COUNT)
 		return -EINVAL;
 
-	if (ANDROID_ALARM_BASE_CMD(cmd) != ANDROID_ALARM_GET_TIME(0)) {
+	if (is_set_cmd(cmd)) {
 		if ((file->f_flags & O_ACCMODE) == O_RDONLY)
 			return -EPERM;
 		if (file->private_data == NULL &&
@@ -182,7 +199,16 @@ from_old_alarm_set:
 			goto err1;
 		}
 		break;
-
+#ifdef CONFIG_BUILD_CIQ
+	case ANDROID_ALARM_GET_TICKS(0):
+		alarm_get_elapsed_ticks(&tmp_time);
+		if (copy_to_user((void __user *)arg, &tmp_time,
+		    sizeof(tmp_time))) {
+			rv = -EFAULT;
+			goto err1;
+		}
+		break;
+#endif
 	default:
 		rv = -EINVAL;
 		goto err1;

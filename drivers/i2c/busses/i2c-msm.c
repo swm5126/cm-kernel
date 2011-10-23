@@ -24,6 +24,7 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/wakelock.h>
+#include <linux/slab.h>
 #include <mach/system.h>
 
 #define DEBUG 0
@@ -80,6 +81,10 @@ struct msm_i2c_dev {
 	int                 clk_drv_str;
 	int                 dat_drv_str;
 	int                 skip_recover;
+	int                 last_addr;
+	int                 reg;
+	int                 last_reg;
+	int                 last_flag;
 };
 
 #if DEBUG
@@ -224,7 +229,10 @@ static void msm_i2c_interrupt_locked(struct msm_i2c_dev *dev)
 	return;
 
 out_err:
-	dev_err(dev->dev, "error, status %x (%02X)\n", status, dev->msg->addr);
+	dev_err(dev->dev, "error, status %x	\
+	(%02X,%02X,%02X)(%02X,%02X,%02X)(cnt:%d,pos:%d)\n",
+	status, dev->msg->addr, dev->reg, dev->msg->flags, dev->last_addr,
+	dev->last_reg, dev->last_flag, dev->cnt, dev->pos);
 	dev->ret = -EIO;
 out_complete:
 	complete(dev->complete);
@@ -336,7 +344,7 @@ msm_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	int ret;
 	long timeout;
 	unsigned long flags;
-
+	uint8_t slave_reg = -1;
 	/*
 	 * If there is an i2c_xfer after driver has been suspended,
 	 * grab wakelock to abort suspend.
@@ -346,15 +354,21 @@ msm_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	clk_enable(dev->clk);
 	enable_irq(dev->irq);
 
+	if (msgs->buf != NULL)
+		slave_reg = msgs->buf[0];
+
 	ret = msm_i2c_poll_notbusy(dev, 1);
 	if (ret) {
-		dev_err(dev->dev, "Still busy in starting xfer(%02X)\n",
-			msgs->addr);
+		dev_err(dev->dev, "Still busy in starting xfer	\
+		(%02X,%02X,%02X)(%02X,%02X,%02X)\n",
+		msgs->addr, slave_reg, msgs->flags,
+		dev->last_addr, dev->last_reg, dev->last_flag);
+
 		if (!dev->skip_recover) {
-			ret = msm_i2c_recover_bus_busy(dev);
-			if (ret)
-				goto err;
-		}
+		ret = msm_i2c_recover_bus_busy(dev);
+		if (ret)
+			goto err;
+	}
 	}
 
 	spin_lock_irqsave(&dev->lock, flags);
@@ -369,6 +383,7 @@ msm_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	dev->need_flush = false;
 	dev->flush_cnt = 0;
 	dev->cnt = msgs->len;
+	dev->reg = slave_reg;
 	dev->complete = &complete;
 
 	msm_i2c_interrupt_locked(dev);
@@ -389,6 +404,9 @@ msm_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 			 dev->flush_cnt);
 	}
 	ret = dev->ret;
+	dev->last_addr = dev->msg->addr;
+	dev->last_reg = dev->reg;
+	dev->last_flag = dev->msg->flags;
 	dev->complete = NULL;
 	dev->msg = NULL;
 	dev->rem = 0;
@@ -403,11 +421,14 @@ msm_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 		ret = -ETIMEDOUT;
 	}
 
+
 	if (ret < 0) {
-		dev_err(dev->dev, "Error during data xfer (%d) (%02X)\n",
-			ret, msgs->addr);
+		dev_err(dev->dev, "Error during data xfer (%d) \
+		(%02X,%02X,%02X)\n",
+		ret, msgs->addr, dev->reg, msgs->flags);
+
 		if (!dev->skip_recover)
-			msm_i2c_recover_bus_busy(dev);
+		msm_i2c_recover_bus_busy(dev);
 	}
 err:
 	disable_irq(dev->irq);
@@ -549,8 +570,8 @@ err_request_irq_failed:
 err_i2c_add_adapter_failed:
 	iounmap(dev->base);
 err_ioremap_failed:
-	kfree(dev);
 err_alloc_dev_failed:
+	kfree(dev);
 	clk_put(clk);
 err_clk_get_failed:
 	release_mem_region(mem->start, (mem->end - mem->start) + 1);

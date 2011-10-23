@@ -75,7 +75,7 @@ static ssize_t htc_store(struct device *dev, struct device_attribute *attr,  con
 	return ret;
 }
 
-static DEVICE_ATTR(flag, 0666, htc_show, htc_store);
+static DEVICE_ATTR(flag, 0664, htc_show, htc_store);
 
 static int port_list_enable(int enable) {
 	if (port_list[0] != enable) {
@@ -116,15 +116,28 @@ static void update_port_list(void) {
 }
 
 static struct p_list *add_list(int no) {
-	struct p_list *ptr;
+    struct p_list *ptr;
+    struct list_head *listptr;
+    struct p_list *entry;
+    int get_list = 0;
 
-	ptr = kmalloc(sizeof(struct p_list), GFP_KERNEL);
-	if(ptr) {
-		ptr->no = no;
-		list_add_tail(&ptr->list, &curr_port_list.list);
-		printk(KERN_INFO "[Port list] Add port [%d]\n", no);
-	}
-	return (ptr);
+    list_for_each(listptr, &curr_port_list.list) {
+        entry = list_entry(listptr, struct p_list, list);
+        if (entry->no == no) {
+            printk(KERN_INFO "[Port list] Port %d is already in the list!", entry->no);
+            get_list = 1;
+            break;
+        }
+    }
+    if(!get_list) {
+        ptr = kmalloc(sizeof(struct p_list), GFP_KERNEL);
+        if(ptr) {
+            ptr->no = no;
+            list_add_tail(&ptr->list, &curr_port_list.list);
+            printk(KERN_INFO "[Port list] Add port [%d]\n", no);
+        }
+    }
+    return (ptr);
 }
 
 static void remove_list(int no) {
@@ -149,8 +162,8 @@ static void remove_list(int no) {
 int add_or_remove_port(struct sock *sk, int add_or_remove) {
 	struct inet_sock *inet = inet_sk(sk);
 	uint32_t port_list_phy_addr;
-	__be32 src = inet->rcv_saddr;
-	__u16 srcp = ntohs(inet->sport);
+	__be32 src = inet->inet_rcv_saddr;
+	__u16 srcp = ntohs(inet->inet_sport);
 
 	wake_lock(&port_suspend_lock);
 	if (!packet_filter_flag) {

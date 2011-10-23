@@ -33,8 +33,8 @@ int cnf_driver_register(struct cnf_driver *driver)
 		return 0;
 	}
 	else{ 
-		printk(KERN_WARNING "Configurable driver %s failed to "
-				"register (NULL driver)\n", driver->name);
+		printk(KERN_WARNING "(%s) Configurable driver failed to "
+				"register (NULL driver)\n", __func__);
 		return -1;
 	}
 }

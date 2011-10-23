@@ -95,6 +95,7 @@ struct tag_serialnr {
 
 struct tag_revision {
 	__u32 rev;
+	__u32 rev2;
 };
 
 /* initial values for vesafb-type framebuffers. see struct screen_info
@@ -140,14 +141,6 @@ struct tag_als_kadc {
 	__u32 kadc;
 };
 
-/* Proximity sensor calibration values */
-#define ATAG_PS		0x5441001c
-
-struct tag_ps_kparam {
-	__u32 kparam1;
-	__u32 kparam2;
-};
-
 /* acorn RiscPC specific information */
 #define ATAG_ACORN	0x41000101
 
@@ -177,7 +170,6 @@ struct tag {
 		struct tag_revision	revision;
 		struct tag_microp_version	microp_version;
 		struct tag_als_kadc als_kadc;
-		struct tag_ps_kparam	ps_kparam;
 		struct tag_videolfb	videolfb;
 		struct tag_cmdline	cmdline;
 

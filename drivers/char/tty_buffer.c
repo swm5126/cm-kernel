@@ -17,6 +17,10 @@
 #include <linux/delay.h>
 #include <linux/module.h>
 
+#if defined(CONFIG_MSM_SMD0_WQ)
+extern struct workqueue_struct *tty_wq;
+#endif
+
 /**
  *	tty_buffer_free_all		-	free buffers used by a tty
  *	@tty: tty to free from
@@ -231,30 +235,31 @@ int tty_buffer_request_room(struct tty_struct *tty, size_t size)
 EXPORT_SYMBOL_GPL(tty_buffer_request_room);
 
 /**
- *	tty_insert_flip_string	-	Add characters to the tty buffer
+ *	tty_insert_flip_string_fixed_flag - Add characters to the tty buffer
  *	@tty: tty structure
  *	@chars: characters
+ *	@flag: flag value for each character
  *	@size: size
  *
  *	Queue a series of bytes to the tty buffering. All the characters
- *	passed are marked as without error. Returns the number added.
+ *	passed are marked with the supplied flag. Returns the number added.
  *
  *	Locking: Called functions may take tty->buf.lock
  */
 
-int tty_insert_flip_string(struct tty_struct *tty, const unsigned char *chars,
-				size_t size)
+int tty_insert_flip_string_fixed_flag(struct tty_struct *tty,
+		const unsigned char *chars, char flag, size_t size)
 {
 	int copied = 0;
 	do {
-		int goal = min(size - copied, TTY_BUFFER_PAGE);
+		int goal = min_t(size_t, size - copied, TTY_BUFFER_PAGE);
 		int space = tty_buffer_request_room(tty, goal);
 		struct tty_buffer *tb = tty->buf.tail;
 		/* If there is no space then tb may be NULL */
 		if (unlikely(space == 0))
 			break;
 		memcpy(tb->char_buf_ptr + tb->used, chars, space);
-		memset(tb->flag_buf_ptr + tb->used, TTY_NORMAL, space);
+		memset(tb->flag_buf_ptr + tb->used, flag, space);
 		tb->used += space;
 		copied += space;
 		chars += space;
@@ -263,7 +268,7 @@ int tty_insert_flip_string(struct tty_struct *tty, const unsigned char *chars,
 	} while (unlikely(size > copied));
 	return copied;
 }
-EXPORT_SYMBOL(tty_insert_flip_string);
+EXPORT_SYMBOL(tty_insert_flip_string_fixed_flag);
 
 /**
  *	tty_insert_flip_string_flags	-	Add characters to the tty buffer
@@ -284,7 +289,7 @@ int tty_insert_flip_string_flags(struct tty_struct *tty,
 {
 	int copied = 0;
 	do {
-		int goal = min(size - copied, TTY_BUFFER_PAGE);
+		int goal = min_t(size_t, size - copied, TTY_BUFFER_PAGE);
 		int space = tty_buffer_request_room(tty, goal);
 		struct tty_buffer *tb = tty->buf.tail;
 		/* If there is no space then tb may be NULL */
@@ -321,6 +326,11 @@ void tty_schedule_flip(struct tty_struct *tty)
 	if (tty->buf.tail != NULL)
 		tty->buf.tail->commit = tty->buf.tail->used;
 	spin_unlock_irqrestore(&tty->buf.lock, flags);
+#if defined(CONFIG_MSM_SMD0_WQ)
+	if (!strcmp(tty->name, "smd0"))
+		queue_delayed_work(tty_wq, &tty->buf.work, 0);
+	else
+#endif
 	schedule_delayed_work(&tty->buf.work, 1);
 }
 EXPORT_SYMBOL(tty_schedule_flip);
@@ -412,7 +422,8 @@ static void flush_to_ldisc(struct work_struct *work)
 	spin_lock_irqsave(&tty->buf.lock, flags);
 
 	if (!test_and_set_bit(TTY_FLUSHING, &tty->flags)) {
-		struct tty_buffer *head;
+		struct tty_buffer *head, *tail = tty->buf.tail;
+		int seen_tail = 0;
 		while ((head = tty->buf.head) != NULL) {
 			int count;
 			char *char_buf;
@@ -422,6 +433,15 @@ static void flush_to_ldisc(struct work_struct *work)
 			if (!count) {
 				if (head->next == NULL)
 					break;
+				/*
+				  There's a possibility tty might get new buffer
+				  added during the unlock window below. We could
+				  end up spinning in here forever hogging the CPU
+				  completely. To avoid this let's have a rest each
+				  time we processed the tail buffer.
+				*/
+				if (tail == head)
+					seen_tail = 1;
 				tty->buf.head = head->next;
 				tty_buffer_free(tty, head);
 				continue;
@@ -431,7 +451,12 @@ static void flush_to_ldisc(struct work_struct *work)
 			   line discipline as we want to empty the queue */
 			if (test_bit(TTY_FLUSHPENDING, &tty->flags))
 				break;
-			if (!tty->receive_room) {
+			if (!tty->receive_room || seen_tail) {
+#if defined(CONFIG_MSM_SMD0_WQ)
+				if (!strcmp(tty->name, "smd0"))
+					queue_delayed_work(tty_wq, &tty->buf.work, 0);
+				else
+#endif
 				schedule_delayed_work(&tty->buf.work, 1);
 				break;
 			}
@@ -485,7 +510,6 @@ void tty_flush_to_ldisc(struct tty_struct *tty)
  *
  *	Locking: tty buffer lock. Driver locks in low latency mode.
  */
-
 void tty_flip_buffer_push(struct tty_struct *tty)
 {
 	unsigned long flags;
@@ -497,7 +521,14 @@ void tty_flip_buffer_push(struct tty_struct *tty)
 	if (tty->low_latency)
 		flush_to_ldisc(&tty->buf.work.work);
 	else
+	{
+#if defined(CONFIG_MSM_SMD0_WQ)
+		if (!strcmp(tty->name, "smd0"))
+			queue_delayed_work(tty_wq, &tty->buf.work, 0);
+		else
+#endif
 		schedule_delayed_work(&tty->buf.work, 1);
+	}
 }
 EXPORT_SYMBOL(tty_flip_buffer_push);
 

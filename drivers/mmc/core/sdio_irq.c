@@ -27,6 +27,10 @@
 
 #include "sdio_ops.h"
 
+#ifdef CONFIG_WIMAX
+extern int mmc_wimax_get_irq_log(void);
+#endif
+static int sdio_debug;
 static int process_sdio_pending_irqs(struct mmc_card *card)
 {
 	int i, ret, count;
@@ -36,6 +40,7 @@ static int process_sdio_pending_irqs(struct mmc_card *card)
 	if (ret) {
 		printk(KERN_DEBUG "%s: error %d reading SDIO_CCCR_INTx\n",
 		       mmc_card_id(card), ret);
+		sdio_debug = 1;
 		return ret;
 	}
 
@@ -49,6 +54,10 @@ static int process_sdio_pending_irqs(struct mmc_card *card)
 					mmc_card_id(card));
 				ret = -EINVAL;
 			} else if (func->irq_handler) {
+				if (sdio_debug) {
+					printk(KERN_DEBUG "%s: pending irq for func%d\n",
+				       mmc_card_id(card), i);
+				}
 				func->irq_handler(func);
 				count++;
 			} else {
@@ -57,6 +66,11 @@ static int process_sdio_pending_irqs(struct mmc_card *card)
 				ret = -EINVAL;
 			}
 		}
+	}
+	if (sdio_debug) {
+		printk(KERN_DEBUG "%s: pending irq 0x%x\n",
+	       mmc_card_id(card), pending);
+		sdio_debug = 0;
 	}
 
 	if (count)
@@ -71,6 +85,11 @@ static int sdio_irq_thread(void *_host)
 	struct sched_param param = { .sched_priority = 1 };
 	unsigned long period, idle_period;
 	int ret;
+
+#ifdef CONFIG_WIMAX
+	unsigned long timeout = jiffies + HZ;
+	static int counter = 0;
+#endif
 
 	sched_setscheduler(current, SCHED_FIFO, &param);
 
@@ -105,6 +124,14 @@ static int sdio_irq_thread(void *_host)
 		if (ret)
 			break;
 		ret = process_sdio_pending_irqs(host->card);
+
+#ifdef CONFIG_WIMAX
+		if (mmc_wimax_get_irq_log()) {
+			if (ret > 0)
+				counter++;
+		}
+#endif
+
 		mmc_release_host(host);
 
 		/*
@@ -139,6 +166,17 @@ static int sdio_irq_thread(void *_host)
 		if (!kthread_should_stop())
 			schedule_timeout(period);
 		set_current_state(TASK_RUNNING);
+
+#ifdef CONFIG_WIMAX
+		if (mmc_wimax_get_irq_log()) {
+			if (time_after(jiffies, timeout)) {
+				pr_info("%s:%s irq count:%d\n", mmc_hostname(host),
+					__func__, counter);
+				timeout = jiffies + HZ;
+			}
+		}
+#endif
+
 	} while (!kthread_should_stop());
 
 	if (host->caps & MMC_CAP_SDIO_IRQ)

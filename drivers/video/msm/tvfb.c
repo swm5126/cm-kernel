@@ -29,6 +29,7 @@
 
 #include <asm/system.h>
 #include <asm/mach-types.h>
+#include <mach/debug_display.h>
 
 #include "mdp_hw.h"
 #include "tv.h"
@@ -174,7 +175,7 @@ static int setup_tvfb_mem(struct tvfb_info *tvfb,
 
 	/* check the resource is large enough to fit the fb */
 	if (resource->end - resource->start < size) {
-		printk(KERN_ERR "allocated resource is too small for "
+		PR_DISP_ERR("allocated resource is too small for "
 				"TV framebuffer\n");
 		return -ENOMEM;
 	}
@@ -184,7 +185,7 @@ static int setup_tvfb_mem(struct tvfb_info *tvfb,
 	fbram = ioremap(resource->start,
 			resource->end - resource->start);
 	if (fbram == 0) {
-		printk(KERN_ERR "tvfb: cannot allocate fbram!\n");
+		PR_DISP_ERR("tvfb: cannot allocate fbram!\n");
 		return -ENOMEM;
 	}
 	fb->screen_base = fbram;
@@ -196,7 +197,7 @@ static void tvfb_refresh_req(struct tvfb_info *tvfb)
 {
 	unsigned orient;
 	unsigned x, y, w, h;
-	unsigned tv_yoffset, tv_height, src_yoffset;
+	unsigned tv_yoffset, tv_height, src_yoffset = 0;
 	unsigned src_format;
 	struct fb_info *src_fb = registered_fb[0];
 
@@ -233,7 +234,7 @@ static void tvfb_refresh_req(struct tvfb_info *tvfb)
 		y = tvfb->aa_margin->top;
 		orient = MDP_ROT_NOP;
 	}
-	pr_info("%s: x=%d, y=%d, w=%d, h=%d\n", __func__, x, y, w, h);
+	PR_DISP_INFO("%s: x=%d, y=%d, w=%d, h=%d\n", __func__, x, y, w, h);
 
 	tvfb_set_mdp_req(&tvfb->mirror_req,
 			MDP_IMG(src_fb->var.xres, src_fb->var.yres,
@@ -340,13 +341,13 @@ static int tvfb_ioctl(struct fb_info *p, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case TV_FB_ENABLE:
-		pr_info("[tvfb] ioctl(TV_FB_ENABLE, %d)\n", (uint32_t)argp);
+		PR_DISP_INFO("[tvfb] ioctl(TV_FB_ENABLE, %d)\n", (uint32_t)argp);
 		tvfb_black(tvfb);
 		ret = tvfb_enable(tvfb, (uint32_t)argp);
 		break;
 
 	case TV_FB_CHANGE_MODE:
-		pr_info("[tvfb] ioctl(TV_FB_CHANGE_MODE, %d)\n", (unsigned)argp);
+		PR_DISP_INFO("[tvfb] ioctl(TV_FB_CHANGE_MODE, %d)\n", (unsigned)argp);
 		if ((unsigned)argp >= NUM_OF_TV_MODE)
 			return -EINVAL;
 		enabled = tvfb->enabled;
@@ -362,7 +363,7 @@ static int tvfb_ioctl(struct fb_info *p, unsigned int cmd, unsigned long arg)
 		break;
 
 	case TV_FB_SET_ORIENTATION:
-		pr_info("[tvfb] ioctl(TV_FB_SET_ORIENTATION)\n");
+		PR_DISP_INFO("[tvfb] ioctl(TV_FB_SET_ORIENTATION)\n");
 		ret = tvfb_set_orientation(tvfb, (unsigned)argp);
 		break;
 
@@ -372,13 +373,13 @@ static int tvfb_ioctl(struct fb_info *p, unsigned int cmd, unsigned long arg)
 		info |= (tvfb->orientation? 1 : 0) << 1;
 		info |= tvfb->mode << 2;
 		mutex_unlock(&tvfb->access_lock);
-		pr_info("[tvfb] ioctl(TV_FB_GET_INFO), info = 0x%08x\n", info);
+		PR_DISP_INFO("[tvfb] ioctl(TV_FB_GET_INFO), info = 0x%08x\n", info);
 		ret = copy_to_user(argp, &info, sizeof(info)) ? -EFAULT : 0;
 		break;
 
 	default:
 		ret = -EINVAL;
-		pr_info("tvfb: unknown ioctl: %d\n", cmd);
+		PR_DISP_INFO("tvfb: unknown ioctl: %d\n", cmd);
 		return -EINVAL;
 }
 	return ret;
@@ -426,7 +427,7 @@ static void tvfb_resume(struct early_suspend *h)
 		mutex_lock(&tvfb->access_lock);
 		ret = panel->resume(panel);
 		if (ret)
-			pr_err("msmfb: panel resume failed, not resuming fb\n");
+			PR_DISP_INFO("msmfb: panel resume failed, not resuming fb\n");
 		else
 			tvenc_set_mode(tvfb->mode);
 		mutex_unlock(&tvfb->access_lock);
@@ -502,7 +503,7 @@ static int tvfb_probe(struct platform_device *pdev)
 
 	tvfb->black = kmalloc(TV_SCREEN_WIDTH * BYTES_PER_PIXEL, GFP_KERNEL);
 	if (tvfb->black == NULL) {
-		pr_err("Unable to allocate memory for black.");
+		PR_DISP_ERR("Unable to allocate memory for black.");
 		ret = -ENOMEM;
 		goto error_register_framebuffer;
 	}

@@ -269,7 +269,7 @@ static void handle_tx(struct uart_port *port)
 {
 	struct circ_buf *xmit = &port->state->xmit;
 	struct msm_port *msm_port = UART_TO_MSM(port);
-	int sent_tx;
+	int sent_tx = 0;
 
 	if (port->x_char) {
 		msm_write(port, port->x_char, UART_TF);
@@ -479,7 +479,6 @@ static void msm_init_clock(struct uart_port *port)
 	struct msm_port *msm_port = UART_TO_MSM(port);
 
 	clk_enable(msm_port->clk);
-
 #ifdef CONFIG_SERIAL_MSM_CLOCK_CONTROL
 	msm_port->clk_state = MSM_CLK_ON;
 #endif
@@ -831,7 +830,8 @@ static void msm_console_write(struct console *co, const char *s,
 static int __init msm_console_setup(struct console *co, char *options)
 {
 	struct uart_port *port;
-	int baud, flow, bits, parity;
+	int flow, bits, parity;
+	int baud = 0;
 
 	if (unlikely(co->index >= UART_NR || co->index < 0))
 		return -ENXIO;
@@ -917,8 +917,10 @@ static int __init msm_serial_probe(struct platform_device *pdev)
 	port->mapbase = resource->start;
 
 	port->irq = platform_get_irq(pdev, 0);
+	/*
 	if (unlikely(port->irq < 0))
 		return -ENXIO;
+	*/
 
 	platform_set_drvdata(pdev, port);
 

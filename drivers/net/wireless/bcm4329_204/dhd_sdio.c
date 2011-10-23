@@ -2,13 +2,13 @@
  * DHD Bus Module for SDIO
  *
  * Copyright (C) 1999-2010, Broadcom Corporation
- * 
+ *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- * 
+ *
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- * 
+ *
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -442,7 +442,7 @@ dhd_dongle_setmemsize(struct dhd_bus *bus, int mem_size)
 {
 	int32 min_size =  DONGLE_MIN_MEMSIZE;
 	/* Restrict the memsize to user specified limit */
-	DHD_ERROR(("user: Restrict the dongle ram size to %d, min accepted %d\n",
+	DHD_DEFAULT(("user: Restrict the dongle ram size to %d, min accepted %d\n",
 		dhd_dongle_memsize, min_size));
 	if ((dhd_dongle_memsize > min_size) &&
 		(dhd_dongle_memsize < (int32)bus->orig_ramsize))
@@ -715,7 +715,7 @@ dhdsdio_clkctl(dhd_bus_t *bus, uint target, bool pendok)
 		else if (bus->clkstate == CLK_AVAIL)
 			dhdsdio_htclk(bus, FALSE, FALSE);
 		else
-			DHD_ERROR(("dhdsdio_clkctl: request for %d -> %d\n",
+			DHD_DEFAULT(("dhdsdio_clkctl: request for %d -> %d\n",
 			           bus->clkstate, target));
 		dhd_os_wd_timer(bus->dhd, dhd_watchdog_ms);
 		break;
@@ -1334,7 +1334,7 @@ dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 		DHD_CTL(("%s: resumed on rxctl frame, got %d expected %d\n",
 		         __FUNCTION__, rxlen, msglen));
 	} else if (timeleft == 0) {
-		DHD_ERROR(("%s: resumed on timeout\n", __FUNCTION__));
+		DHD_DEFAULT(("%s: resumed on timeout\n", __FUNCTION__));
 #ifdef WLAN_PROTECT
 		if (!start_poll) {
 			bus->pollrate = 1;
@@ -1374,7 +1374,7 @@ dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 			start_poll = 0;
 		}
 		wl_iw_set_busdown(1);
-		DHD_ERROR(("bring bus down!\n"));
+		DHD_ERROR(("dhd_bus_rxctl:resumed on timeout(count=2) -> bring bus down!\n"));
 	}
 #endif
 	return rxlen ? (int)rxlen : -ETIMEDOUT;
@@ -2285,7 +2285,7 @@ dhdsdio_download_state(dhd_bus_t *bus, bool enter)
 		}
 
 		if ((bcmerror = dhdsdio_write_vars(bus))) {
-			DHD_ERROR(("%s: no vars written to RAM\n", __FUNCTION__));
+			DHD_DEFAULT(("%s: no vars written to RAM\n", __FUNCTION__));
 			bcmerror = 0;
 		}
 
@@ -2445,6 +2445,8 @@ dhd_bus_stop(struct dhd_bus *bus, bool enforce_mutex)
 	if (enforce_mutex)
 		dhd_os_sdlock(bus->dhd);
 
+	myprintf("%s enter\n", __func__);
+
 	BUS_WAKE(bus);
 
 	/* Enable clock for device interrupts */
@@ -2566,7 +2568,10 @@ dhd_bus_init(dhd_pub_t *dhdp, bool enforce_mutex)
 
 		/* Set up the interrupt mask and enable interrupts */
 		bus->hostintmask = HOSTINTMASK;
-		W_SDREG(bus->hostintmask, &bus->regs->hostintmask, retries);
+#ifdef HTC_KlocWork
+    if(bus->regs != NULL)
+#endif
+        W_SDREG(bus->hostintmask, &bus->regs->hostintmask, retries);
 
 		bcmsdh_cfg_write(bus->sdh, SDIO_FUNC_1, SBSDIO_WATERMARK, (uint8)watermark, &err);
 
@@ -3798,6 +3803,21 @@ dhdsdio_hostmail(dhd_bus_t *bus)
 	return intstatus;
 }
 
+#ifdef MMC_RECOVER
+static uint8 prev_tx_seq = 0;
+static uint8 prev_tx_max = 0;
+static int max_equal_count = 0;
+static int start_mmc_recover = 0;
+void dhdsdio_set_mmc_recover(int set)
+{
+	// myprintf("set mmc recover %d\n", set);
+	if (set)
+		start_mmc_recover = 1;
+	else
+		start_mmc_recover = 0;
+}
+#endif
+
 static int dhdsdio_regfail = 0;
 bool
 dhdsdio_dpc(dhd_bus_t *bus)
@@ -3957,6 +3977,28 @@ clkwait:
 		bcmsdh_intr_enable(sdh);
 	}
 
+#ifdef MMC_RECOVER
+	if (start_mmc_recover) {
+		if ((bus->tx_max == bus->tx_seq)&&(bus->tx_max == prev_tx_max)&&(bus->tx_seq == prev_tx_seq)) {
+			max_equal_count++;
+			//myprintf("bad case, count %d\n", max_equal_count);
+			//myprintf("framecnt = %d\n", framecnt);
+		} else {
+			max_equal_count = 0;
+		}
+
+		prev_tx_max = bus->tx_max;
+		prev_tx_seq = bus->tx_seq;
+
+		if (max_equal_count >= 5) {
+			bus->tx_seq = (bus->tx_seq + 1) % SDPCM_SEQUENCE_WRAP;
+			//bus->tx_max = bus->tx_seq + 2;
+			max_equal_count = 0;
+			//myprintf("reset count\n");
+		}
+	}
+#endif
+
 	if (DATAOK(bus) && bus->ctrl_frame_stat) {
 		int ret, i;
 
@@ -4102,7 +4144,7 @@ dhdsdio_isr(void *arg)
 #else
 	bus->dpc_sched = TRUE;
 	dhd_sched_dpc(bus->dhd);
-#endif 
+#endif
 
 }
 
@@ -4806,7 +4848,7 @@ dhdsdio_probe_attach(struct dhd_bus *bus, osl_t *osh, void *sdh, void *regsva,
 		if (dhd_dongle_memsize)
 			dhd_dongle_setmemsize(bus, dhd_dongle_memsize);
 
-		DHD_ERROR(("DHD: dongle ram size is set to %d(orig %d)\n",
+		DHD_DEFAULT(("DHD: dongle ram size is set to %d(orig %d)\n",
 			bus->ramsize, bus->orig_ramsize));
 	}
 
@@ -5012,9 +5054,11 @@ dhdsdio_release(dhd_bus_t *bus, osl_t *osh)
 
 		if (bus->dhd) {
 
-			dhdsdio_release_dongle(bus, osh);
-
+			/* BRCM: anthony: move dhd_detach before dhdsdio_release_dongle
+			 * to avoid unnecessary commands running.
+			 */
 			dhd_detach(bus->dhd);
+			dhdsdio_release_dongle(bus, osh);
 			bus->dhd = NULL;
 		}
 
@@ -5064,11 +5108,11 @@ dhdsdio_release_dongle(dhd_bus_t *bus, osl_t *osh)
 		return;
 
 	if (bus->sih) {
-		dhdsdio_clkctl(bus, CLK_AVAIL, FALSE);
 #if !defined(BCMLXSDMMC)
+		dhdsdio_clkctl(bus, CLK_AVAIL, FALSE);
 		si_watchdog(bus->sih, 4);
-#endif /* !defined(BCMLXSDMMC) */
 		dhdsdio_clkctl(bus, CLK_NONE, FALSE);
+#endif /* !defined(BCMLXSDMMC) */
 		si_detach(bus->sih);
 		if (bus->vars && bus->varsz)
 			MFREE(osh, bus->vars, bus->varsz);
@@ -5311,6 +5355,91 @@ dhd_bus_set_nvram_params(struct dhd_bus * bus, const char *nvram_params)
 	bus->nvram_params = nvram_params;
 }
 
+#define WIFI_MAC_PARAM_STR	"macaddr="
+#define WIFI_MAX_MAC_LEN	17 /* XX:XX:XX:XX:XX:XX */
+
+#define NVS_LEN_OFFSET		0x0C
+#define NVS_DATA_OFFSET		0x40
+
+extern unsigned char *get_wifi_nvs_ram(void);
+
+static uint
+get_mac_from_wifi_nvs_ram(char* buf, unsigned int buf_len)
+{
+	unsigned char *nvs_ptr;
+	unsigned char *mac_ptr;
+	uint len = 0;
+
+	if (!buf || !buf_len) {
+		return 0;
+	}
+
+	nvs_ptr = get_wifi_nvs_ram();
+	if (nvs_ptr) {
+		nvs_ptr += NVS_DATA_OFFSET;
+	}
+
+	mac_ptr = strstr(nvs_ptr, WIFI_MAC_PARAM_STR);
+	if (mac_ptr) {
+		mac_ptr += strlen(WIFI_MAC_PARAM_STR);
+
+		/* skip leading space */
+		while (mac_ptr[0] == ' ') {
+			mac_ptr++;
+		}
+
+		/* locate end-of-line */
+		len = 0;
+		while (mac_ptr[len] != '\r' && mac_ptr[len] != '\n' &&
+				mac_ptr[len] != '\0') {
+			len++;
+		}
+
+		if (len > buf_len) {
+			len = buf_len;
+		}
+		memcpy(buf, mac_ptr, len);
+	}
+
+	return len;
+}
+
+/*
+ * Modify mac address attribute in buffer
+ * return : length of modified buffer
+ */
+static uint
+modify_mac_attr(char* buf, unsigned buf_len, char *mac, unsigned int mac_len)
+{
+	unsigned char *mac_ptr;
+	uint len;
+
+	if (!buf || !mac) {
+		return buf_len;
+	}
+
+	mac_ptr = strstr(buf, WIFI_MAC_PARAM_STR);
+	if (mac_ptr) {
+		mac_ptr += strlen(WIFI_MAC_PARAM_STR);
+
+		/* locate end-of-line */
+		len = 0;
+		while (mac_ptr[len] != '\r' && mac_ptr[len] != '\n' &&
+				mac_ptr[len] != '\0') {
+			len++;
+		}
+
+		if (len != mac_len) {
+			/* shift remaining data */
+			memmove(&mac_ptr[mac_len + 1], &mac_ptr[len + 1], buf_len - len);
+			buf_len = buf_len - len + mac_len;
+		}
+		memcpy(mac_ptr, mac, mac_len);
+	}
+
+	return buf_len;
+}
+
 static int
 dhdsdio_download_nvram(struct dhd_bus *bus)
 {
@@ -5321,6 +5450,9 @@ dhdsdio_download_nvram(struct dhd_bus *bus)
 	char *bufp;
 	char *nv_path;
 	bool nvram_file_exists;
+
+	char mac[WIFI_MAX_MAC_LEN];
+	unsigned mac_len;
 
 	nv_path = bus->nv_path;
 
@@ -5344,6 +5476,11 @@ dhdsdio_download_nvram(struct dhd_bus *bus)
 	/* Download variables */
 	if (nvram_file_exists) {
 		len = dhd_os_get_image_block(memblock, MEMBLOCK, image);
+
+		mac_len = get_mac_from_wifi_nvs_ram(mac, WIFI_MAX_MAC_LEN);
+		if (mac_len > 0) {
+			len = modify_mac_attr(memblock, len, mac, mac_len);
+		}
 	}
 	else {
 		len = strlen(bus->nvram_params);
@@ -5564,7 +5701,7 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 #if !defined(IGNORE_ETH0_DOWN)
 					/* Restore flow control  */
 					dhd_txflowcontrol(bus->dhd, 0, OFF);
-#endif 
+#endif
 
 					DHD_TRACE(("%s: WLAN ON DONE\n", __FUNCTION__));
 				} else

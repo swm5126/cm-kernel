@@ -17,6 +17,7 @@
 #include <linux/types.h>
 #include <linux/list.h>
 #include <asm/setup.h>
+#include <mach/board.h>
 #include <mach/msm_hsusb.h>
 
 struct msm_pmem_setting{
@@ -46,6 +47,16 @@ struct msm_pmem_setting{
 #endif
 };
 
+#if defined(CONFIG_ARCH_MSM8X60)
+struct msm_mem_settings {
+	/* key attributes for identifying the setting. */
+	unsigned mem_size_mb;
+
+	/* native meminfo data structure */
+	struct meminfo mem_info;
+};
+#endif
+
 enum {
 	MSM_SERIAL_UART1	= 0,
 	MSM_SERIAL_UART2,
@@ -66,7 +77,7 @@ void __init msm_add_usb_id_pin_gpio(int usb_id_pin_io);
 void __init msm_enable_car_kit_detect(bool enable);
 void __init msm_change_usb_id(__u16 vendor_id, __u16 product_id);
 void __init msm_add_mem_devices(struct msm_pmem_setting *setting);
-void __init msm_init_pmic_vibrator(void);
+void __init msm_init_pmic_vibrator(int);
 #ifdef CONFIG_USB_FUNCTION
 void __init msm_register_uart_usb_switch(void (*usb_uart_switch) (int));
 void __init msm_register_usb_phy_init_seq(int *int_seq);
@@ -84,10 +95,7 @@ int __init board_mcp_monodie(void);
 int __init parse_tag_smi(const struct tag *tags);
 int __init parse_tag_hwid(const struct tag *tags);
 int __init parse_tag_monodie(const struct tag *tags);
-/* Move these two into board.h
-int __init parse_tag_skuid(const struct tag * tags);
-int parse_tag_engineerid(const struct tag * tags);
-*/
+
 void board_get_keycaps_tag(char **);
 void board_get_cid_tag(char **);
 void board_get_carrier_tag(char **);
@@ -109,5 +117,10 @@ extern int panel_type;
 extern unsigned engineer_id;
 extern int usb_phy_error;
 
+unsigned int get_kernel_flag(void);
+unsigned int get_radio_flag(void);
+#if defined(CONFIG_ARCH_MSM8X60)
+int msm_fixup(struct tag *tags, struct meminfo *mi);
+#endif
 
 #endif

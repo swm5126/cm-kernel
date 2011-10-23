@@ -318,7 +318,7 @@ static int capella_cm3602_probe(struct platform_device *pdev)
 	struct input_dev *input_dev;
 	struct capella_cm3602_data *ip;
 	struct capella_cm3602_platform_data *pdata;
-
+	int ret;
 	struct class  *proximity_attr_class;
 	struct device *proximity_attr_dev;
 
@@ -393,18 +393,26 @@ static int capella_cm3602_probe(struct platform_device *pdev)
 			__func__, pdata->p_en, rc);
 		goto err_request_proximity_en;
 	}
-
-	rc = request_irq(pdata->p_out, p_sensor_irq_handler,
-					IRQF_TRIGGER_NONE, "p-sensor_microp", ip);
-	if (rc < 0) {
-		pr_err("%s: request_irq(%d) failed for (%d)\n",
-				__func__, pdata->p_out, rc);
-		goto err_request_proximity_irq;
+	if (pdata->p_out) {
+		rc = request_irq(pdata->p_out, p_sensor_irq_handler,
+						IRQF_TRIGGER_NONE, "p-sensor_microp", ip);
+		if (rc < 0) {
+			pr_err("%s: request_irq(%d) failed for (%d)\n",
+					__func__, pdata->p_out, rc);
+			goto err_request_proximity_irq;
+		}
+		ret = set_irq_wake(pdata->p_out, 1);
+		if (ret < 0) {
+			pr_err("%s: err_set_microp_proximity_irq_wake(%d) failed for (%d)\n",
+				__func__, pdata->p_out, ret);
+			goto err_set_microp_proximity_irq_wake;
+		}
 	}
-
-
 	goto done;
 
+err_set_microp_proximity_irq_wake:
+	if (pdata->p_out)
+		free_irq(pdata->p_out, 0);
 err_request_proximity_irq:
 	gpio_free(pdata->p_en);
 err_request_proximity_en:

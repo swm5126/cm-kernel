@@ -26,6 +26,7 @@
 #include <linux/miscdevice.h>
 #include <linux/lightsensor.h>
 #include <linux/irq.h>
+#include <linux/slab.h>
 #include <asm/uaccess.h>
 #include "proc_comm.h"
 
@@ -87,7 +88,7 @@ static int i2c_read_block(struct i2c_client *client, uint8_t addr,
 			addr, hex2string(data, length));
 
 	if (retry > I2C_READ_RETRY_TIMES) {
-		dev_err(&client->dev, "i2c_read_block retry over %d\n",
+		dev_err(&client->dev, "[MP_I2C_ERR] i2c_read_block retry over %d\n",
 			I2C_READ_RETRY_TIMES);
 		return -EIO;
 	}
@@ -116,7 +117,7 @@ static int i2c_write_block(struct i2c_client *client, uint8_t addr,
 
 	cdata = i2c_get_clientdata(client);
 	if (length + 1 > MICROP_I2C_WRITE_BLOCK_SIZE) {
-		dev_err(&client->dev, "i2c_write_block length too long\n");
+		dev_err(&client->dev, "[MP_I2C_ERR] i2c_write_block length too long\n");
 		return -E2BIG;
 	}
 
@@ -132,7 +133,7 @@ static int i2c_write_block(struct i2c_client *client, uint8_t addr,
 		msleep(microp_rw_delay);
 	}
 	if (retry > I2C_WRITE_RETRY_TIMES) {
-		dev_err(&client->dev, "i2c_write_block retry over %d\n",
+		dev_err(&client->dev, "[MP_I2C_ERR] i2c_write_block retry over %d\n",
 			I2C_WRITE_RETRY_TIMES);
 		mutex_unlock(&cdata->microp_i2c_rw_mutex);
 		return -EIO;
@@ -149,12 +150,12 @@ int microp_i2c_read(uint8_t addr, uint8_t *data, int length)
 	struct i2c_client *client = private_microp_client;
 
 	if (!client)	{
-		printk(KERN_ERR "%s: dataset: client is empty\n", __func__);
+		printk(KERN_ERR "[MP_I2C_ERR] %s: dataset: client is empty\n", __func__);
 		return -EIO;
 	}
 
 	if (i2c_read_block(client, addr, data, length) < 0)	{
-		dev_err(&client->dev, "%s: write microp i2c fail\n", __func__);
+		dev_err(&client->dev, "[MP_I2C_ERR] %s: write microp i2c fail\n", __func__);
 		return -EIO;
 	}
 
@@ -167,12 +168,12 @@ int microp_i2c_write(uint8_t addr, uint8_t *data, int length)
 	struct i2c_client *client = private_microp_client;
 
 	if (!client)	{
-		printk(KERN_ERR "%s: dataset: client is empty\n", __func__);
+		printk(KERN_ERR "[MP_I2C_ERR] %s: dataset: client is empty\n", __func__);
 		return -EIO;
 	}
 
 	if (i2c_write_block(client, addr, data, length) < 0)	{
-		dev_err(&client->dev, "%s: write microp i2c fail\n", __func__);
+		dev_err(&client->dev, "[MP_I2C_ERR] %s: write microp i2c fail\n", __func__);
 		return -EIO;
 	}
 
@@ -229,7 +230,7 @@ int microp_write_interrupt(struct i2c_client *client,
 	ret = i2c_write_block(client, addr, data, 2);
 
 	if (ret < 0)
-		dev_err(&client->dev, "%s: %s 0x%x interrupt failed\n",
+		dev_err(&client->dev, "[MP_INTR_ERR] %s: %s 0x%x interrupt failed\n",
 			__func__, (enable ? "enable" : "disable"), interrupt);
 	return ret;
 }
@@ -246,13 +247,13 @@ int microp_read_adc(uint8_t *data)
 	mutex_lock(&cdata->microp_adc_mutex);
 	if (i2c_write_block(client, MICROP_I2C_WCMD_READ_ADC_VALUE_REQ,
 			data, 2) < 0) {
-		dev_err(&client->dev, "%s: request adc fail\n", __func__);
+		dev_err(&client->dev, "[MP_ADC_ERR] %s: request adc fail\n", __func__);
 		ret = -EIO;
 		goto exit;
 	}
-	memset(data, 0x00, sizeof(data));
+	memset(data, 0x00, 2);
 	if (i2c_read_block(client, MICROP_I2C_RCMD_ADC_VALUE, data, 2) < 0) {
-		dev_err(&client->dev, "%s: read adc fail\n", __func__);
+		dev_err(&client->dev, "[MP_ADC_ERR] %s: read adc fail\n", __func__);
 		ret = -EIO;
 		goto exit;
 	}
@@ -276,10 +277,10 @@ int microp_read_gpio_status(uint8_t *data)
 		length = 2;
 	else
 		length = 3;
-	memset(data, 0x00, sizeof(data));
+	memset(data, 0x00, length);
 	if (i2c_read_block(client, MICROP_I2C_RCMD_GPIO_STATUS,
 			data, length) < 0) {
-		dev_err(&client->dev, "%s: read gpio status fail\n", __func__);
+		dev_err(&client->dev, "[MP_GPIO_ERR] %s: read gpio status fail\n", __func__);
 		return -EIO;
 	}
 	return 0;
@@ -313,7 +314,7 @@ static int microp_spi_enable(struct i2c_client *client, uint8_t enable)
 	data = enable ? 1 : 0;
 	ret = i2c_write_block(client, MICROP_I2C_WCMD_SPI_EN, &data, 1);
 	if (ret != 0)
-		printk(KERN_ERR "%s: set SPI %s fail\n", __func__,
+		printk(KERN_ERR "[MP_SPI_ERR] %s: set SPI %s fail\n", __func__,
 			(enable ? "enable" : "disable"));
 
 	return ret;
@@ -328,7 +329,7 @@ int microp_spi_vote_enable(int spi_device, uint8_t enable)
 	int ret = 0;
 
 	if (!client)	{
-		printk(KERN_ERR "%s: dataset: client is empty\n", __func__);
+		printk(KERN_ERR "[MP_SPI_ERR] %s: dataset: client is empty\n", __func__);
 		return -EIO;
 	}
 	cdata = i2c_get_clientdata(client);
@@ -345,7 +346,7 @@ int microp_spi_vote_enable(int spi_device, uint8_t enable)
 
 	ret = i2c_read_block(client, MICROP_I2C_RCMD_SPI_BL_STATUS, data, 2);
 	if (ret != 0) {
-		printk(KERN_ERR "%s: read SPI/BL status fail\n", __func__);
+		printk(KERN_ERR "[MP_SPI_ERR] %s: read SPI/BL status fail\n", __func__);
 		goto exit;
 	}
 
@@ -399,7 +400,6 @@ static ssize_t microp_reset_store(struct device *dev,
 				   const char *buf, size_t count)
 {
 	struct i2c_client *client;
-	struct microp_i2c_client_data *cdata;
 	int val;
 
 	val = -1;
@@ -408,7 +408,6 @@ static ssize_t microp_reset_store(struct device *dev,
 		return -EINVAL;
 
 	client = to_i2c_client(dev);
-	cdata = i2c_get_clientdata(client);
 
 	microp_reset_microp(client);
 	if (board_ops->init_microp_func)
@@ -437,7 +436,6 @@ static ssize_t microp_gpio_store(struct device *dev,
 				   const char *buf, size_t count)
 {
 	struct i2c_client *client;
-	struct microp_i2c_client_data *cdata;
 	int enable = 0, tmp[3] = {0, 0, 0};
 	uint8_t addr, data[3] = {0, 0, 0};
 
@@ -447,7 +445,6 @@ static ssize_t microp_gpio_store(struct device *dev,
 		return -EINVAL;
 
 	client = to_i2c_client(dev);
-	cdata = i2c_get_clientdata(client);
 
 	if (enable)
 		addr = MICROP_I2C_WCMD_GPO_LED_STATUS_EN;
@@ -456,7 +453,9 @@ static ssize_t microp_gpio_store(struct device *dev,
 	data[0] = (uint8_t)tmp[0];
 	data[1] = (uint8_t)tmp[1];
 	data[2] = (uint8_t)tmp[2];
-	i2c_write_block(client, addr, data, 3);
+
+	if (i2c_write_block(client, addr, data, 3) < 0)
+		printk(KERN_ERR "%s: i2c_write_block failed\n", __func__);
 
 	return count;
 }
@@ -515,7 +514,7 @@ static void microp_intr_work_func(struct work_struct *work)
 	zero_debounce = ktime_set(0, 0);  /* No debounce time */
 
 	if (!client) {
-		printk(KERN_ERR "%s: dataset: client is empty\n", __func__);
+		printk(KERN_ERR "[MP_INTR_ERR] %s: dataset: client is empty\n", __func__);
 		return;
 	}
 
@@ -525,12 +524,12 @@ static void microp_intr_work_func(struct work_struct *work)
 	memset(data, 0x00, sizeof(data));
 	if (i2c_read_block(client, MICROP_I2C_RCMD_GPI_INT_STATUS,
 			data, 2) < 0)
-		dev_err(&client->dev, "%s: read interrupt status fail\n",
+		dev_err(&client->dev, "[MP_INTR_ERR] %s: read interrupt status fail\n",
 				__func__);
 	intr_status = data[0]<<8 | data[1];
 	if (i2c_write_block(client, MICROP_I2C_WCMD_GPI_INT_STATUS_CLR,
 			data, 2) < 0)
-		dev_err(&client->dev, "%s: clear interrupt status fail\n",
+		dev_err(&client->dev, "[MP_INTR_ERR] %s: clear interrupt status fail\n",
 				__func__);
 
 	if (intr_status & cdata->int_pin.int_reset) {
@@ -567,7 +566,7 @@ static void microp_early_suspend(struct early_suspend *h)
 	struct microp_i2c_platform_data *pdata;
 
 	if (!client) {
-		printk(KERN_ERR "%s: dataset: client is empty\n", __func__);
+		printk(KERN_ERR "[MP_MGR_ERR] %s: dataset: client is empty\n", __func__);
 		return;
 	}
 	cdata = i2c_get_clientdata(client);
@@ -583,7 +582,7 @@ static void microp_late_resume(struct early_suspend *h)
 	struct microp_i2c_platform_data *pdata;
 
 	if (!client) {
-		printk(KERN_ERR "%s: dataset: client is empty\n", __func__);
+		printk(KERN_ERR "[MP_MGR_ERR] %s: dataset: client is empty\n", __func__);
 		return;
 	}
 	cdata = i2c_get_clientdata(client);
@@ -647,10 +646,12 @@ static int microp_i2c_probe(struct i2c_client *client
 	uint8_t data[6];
 	int ret;
 
+	memset(data, 0, sizeof(data));
+
 	cdata = kzalloc(sizeof(struct microp_i2c_client_data), GFP_KERNEL);
 	if (!cdata) {
 		ret = -ENOMEM;
-		dev_err(&client->dev, "failed on allocat cdata\n");
+		dev_err(&client->dev, "[MP_PROBE_ERR] failed on allocat cdata\n");
 		goto err_cdata;
 	}
 
@@ -663,16 +664,16 @@ static int microp_i2c_probe(struct i2c_client *client
 	pdata = client->dev.platform_data;
 	if (!pdata) {
 		ret = -EBUSY;
-		dev_err(&client->dev, "failed on get pdata\n");
+		dev_err(&client->dev, "[MP_PROBE_ERR] failed on get pdata\n");
 		goto err_exit;
 	}
 	pdata->dev_id = (void *)&client->dev;
 	microp_rw_delay = 5;
 
 	ret = i2c_read_block(client, MICROP_I2C_RCMD_VERSION, data, 2);
-	if (ret || !(data[0] && data[1])) {
+	if ((ret != 0) || !(data[0] && data[1])) {
 		ret = -ENODEV;
-		dev_err(&client->dev, "failed on get microp version\n");
+		dev_err(&client->dev, "[MP_PROBE_ERR] failed on get microp version\n");
 		goto err_exit;
 	}
 	dev_info(&client->dev, "microp version [%02X][%02X]\n",
@@ -680,13 +681,13 @@ static int microp_i2c_probe(struct i2c_client *client
 
 	ret = gpio_request(pdata->gpio_reset, "atmega_microp");
 	if (ret < 0) {
-		dev_err(&client->dev, "failed on request gpio reset\n");
+		dev_err(&client->dev, "[MP_PROBE_ERR] failed on request gpio reset\n");
 		goto err_exit;
 	}
 	ret = gpio_direction_output(pdata->gpio_reset, 1);
 	if (ret < 0) {
 		dev_err(&client->dev,
-				"failed on gpio_direction_output reset\n");
+				"[MP_PROBE_ERR] failed on gpio_direction_output reset\n");
 		goto err_gpio_reset;
 	}
 
@@ -737,7 +738,7 @@ static int microp_i2c_probe(struct i2c_client *client
 		ret = board_ops->init_microp_func(client);
 		if (ret) {
 			dev_err(&client->dev,
-				"failed on microp function initialize\n");
+				"[MP_PROBE_ERR] failed on microp function initialize\n");
 			goto err_fun_init;
 		}
 	}
@@ -759,6 +760,8 @@ err_gpio_reset:
 	gpio_free(pdata->gpio_reset);
 err_exit:
 	private_microp_client = NULL;
+	dev_err(&client->dev, "[MP_PROBE_ERR] try to reset microp to recovery I2C bus\n");
+	microp_reset_microp(client);
 err_cdata:
 	return ret;
 }
@@ -794,12 +797,18 @@ static void microp_irq_unmask(unsigned int irq)
 	;
 }
 
+static int microp_irq_set_wake(unsigned int irq, unsigned int on)
+{
+	return 0;
+}
+
 static struct irq_chip microp_irq_chip = {
 	.name = "microp",
 	.disable = microp_irq_mask,
 	.ack = microp_irq_ack,
 	.mask = microp_irq_mask,
 	.unmask = microp_irq_unmask,
+	.set_wake = microp_irq_set_wake,
 };
 
 static int __init microp_common_init(void)

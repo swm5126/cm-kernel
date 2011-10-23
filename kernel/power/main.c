@@ -15,6 +15,10 @@
 
 #include "power.h"
 
+#ifdef CONFIG_PERFLOCK
+#include <mach/perflock.h>
+#endif
+
 DEFINE_MUTEX(pm_mutex);
 
 unsigned int pm_flags;
@@ -43,6 +47,32 @@ int pm_notifier_call_chain(unsigned long val)
 	return (blocking_notifier_call_chain(&pm_chain_head, val, NULL)
 			== NOTIFY_BAD) ? -EINVAL : 0;
 }
+
+/* If set, devices may be suspended and resumed asynchronously. */
+int pm_async_enabled = 1;
+
+static ssize_t pm_async_show(struct kobject *kobj, struct kobj_attribute *attr,
+			     char *buf)
+{
+	return sprintf(buf, "%d\n", pm_async_enabled);
+}
+
+static ssize_t pm_async_store(struct kobject *kobj, struct kobj_attribute *attr,
+			      const char *buf, size_t n)
+{
+	unsigned long val;
+
+	if (strict_strtoul(buf, 10, &val))
+		return -EINVAL;
+
+	if (val > 1)
+		return -EINVAL;
+
+	pm_async_enabled = val;
+	return n;
+}
+
+power_attr(pm_async);
 
 #ifdef CONFIG_PM_DEBUG
 int pm_test_level = TEST_NONE;
@@ -211,7 +241,6 @@ pm_trace_store(struct kobject *kobj, struct kobj_attribute *attr,
 	return -EINVAL;
 }
 
-
 power_attr(pm_trace);
 
 int pm_trace_mask;
@@ -244,18 +273,94 @@ power_attr(wake_lock);
 power_attr(wake_unlock);
 #endif
 
+#ifdef CONFIG_PERFLOCK
+static struct perf_lock user_perf_lock;
+static ssize_t
+perflock_show(struct kobject *kobj, struct kobj_attribute *attr,
+			     char *buf)
+{
+	return sprintf(buf, "%d\n", (is_perf_lock_active(&user_perf_lock) != 0));
+}
+
+static ssize_t
+perflock_store(struct kobject *kobj, struct kobj_attribute *attr,
+	       const char *buf, size_t n)
+{
+	int val;
+
+	if (sscanf(buf, "%d", &val) > 0) {
+		if (val == 1 && !is_perf_lock_active(&user_perf_lock))
+			perf_lock(&user_perf_lock);
+		if (val == 0 && is_perf_lock_active(&user_perf_lock))
+			perf_unlock(&user_perf_lock);
+		return n;
+	}
+	return -EINVAL;
+}
+power_attr(perflock);
+#endif
+
+#ifdef CONFIG_HTC_ONMODE_CHARGING
+static ssize_t state_onchg_show(struct kobject *kobj, struct kobj_attribute *attr,
+			     char *buf)
+{
+	char *s = buf;
+	if (get_onchg_state())
+		s += sprintf(s, "chgoff ");
+	else
+		s += sprintf(s, "chgon ");
+
+	if (s != buf)
+		/* convert the last space to a newline */
+		*(s-1) = '\n';
+
+	return (s - buf);
+}
+
+static ssize_t
+state_onchg_store(struct kobject *kobj, struct kobj_attribute *attr,
+	       const char *buf, size_t n)
+{
+	char *p;
+	int len;
+
+	p = memchr(buf, '\n', n);
+	len = p ? p - buf : n;
+
+	if (len == 5 || len == 6 || len == 7) {
+		if (!strncmp(buf, "chgon", len))
+			request_onchg_state(1);
+		else if (!strncmp(buf, "chgoff", len))
+			request_onchg_state(0);
+	}
+
+	return 0;
+}
+
+power_attr(state_onchg);
+#endif
+
 static struct attribute * g[] = {
 	&state_attr.attr,
 #ifdef CONFIG_PM_TRACE
 	&pm_trace_attr.attr,
 	&pm_trace_mask_attr.attr,
 #endif
-#if defined(CONFIG_PM_SLEEP) && defined(CONFIG_PM_DEBUG)
+#ifdef CONFIG_PM_SLEEP
+	&pm_async_attr.attr,
+#ifdef CONFIG_PM_DEBUG
 	&pm_test_attr.attr,
 #endif
 #ifdef CONFIG_USER_WAKELOCK
 	&wake_lock_attr.attr,
 	&wake_unlock_attr.attr,
+#endif
+#ifdef CONFIG_HTC_ONMODE_CHARGING
+	&state_onchg_attr.attr,
+#endif
+#endif
+#ifdef CONFIG_PERFLOCK
+	&perflock_attr.attr,
 #endif
 	NULL,
 };
@@ -266,6 +371,7 @@ static struct attribute_group attr_group = {
 
 #ifdef CONFIG_PM_RUNTIME
 struct workqueue_struct *pm_wq;
+EXPORT_SYMBOL_GPL(pm_wq);
 
 static int __init pm_start_workqueue(void)
 {
@@ -283,6 +389,9 @@ static int __init pm_init(void)
 	if (error)
 		return error;
 	power_kobj = kobject_create_and_add("power", NULL);
+#ifdef CONFIG_PERFLOCK
+	perf_lock_init(&user_perf_lock, PERF_LOCK_HIGHEST, "User Perflock");
+#endif
 	if (!power_kobj)
 		return -ENOMEM;
 	return sysfs_create_group(power_kobj, &attr_group);

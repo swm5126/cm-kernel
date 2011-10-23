@@ -18,6 +18,7 @@
 #include <linux/string.h>
 #include <linux/mutex.h>
 #include <linux/clk.h>
+#include <linux/slab.h>
 
 #include <asm/clkdev.h>
 #include <mach/clkdev.h>
@@ -32,7 +33,7 @@ static DEFINE_MUTEX(clocks_mutex);
  *  If an entry has a device ID, it must match
  *  If an entry has a connection ID, it must match
  * Then we take the most specific entry - with the following
- * order of precidence: dev+con > dev only > con only.
+ * order of precedence: dev+con > dev only > con only.
  */
 static struct clk *clk_find(const char *dev_id, const char *con_id)
 {
@@ -52,12 +53,13 @@ static struct clk *clk_find(const char *dev_id, const char *con_id)
 				continue;
 			match += 1;
 		}
-		if (match == 0)
-			continue;
 
 		if (match > best) {
 			clk = p->clk;
-			best = match;
+			if (match != 3)
+				best = match;
+			else
+				break;
 		}
 	}
 	return clk;
@@ -77,6 +79,7 @@ struct clk *clk_get_sys(const char *dev_id, const char *con_id)
 }
 EXPORT_SYMBOL(clk_get_sys);
 
+#if defined(CONFIG_ARCH_MSM8X60)
 struct clk *clk_get(struct device *dev, const char *con_id)
 {
 	const char *dev_id = dev ? dev_name(dev) : NULL;
@@ -90,6 +93,7 @@ void clk_put(struct clk *clk)
 	__clk_put(clk);
 }
 EXPORT_SYMBOL(clk_put);
+#endif
 
 void clkdev_add(struct clk_lookup *cl)
 {
@@ -98,6 +102,16 @@ void clkdev_add(struct clk_lookup *cl)
 	mutex_unlock(&clocks_mutex);
 }
 EXPORT_SYMBOL(clkdev_add);
+
+void __init clkdev_add_table(struct clk_lookup *cl, size_t num)
+{
+	mutex_lock(&clocks_mutex);
+	while (num--) {
+		list_add_tail(&cl->node, &clocks);
+		cl++;
+	}
+	mutex_unlock(&clocks_mutex);
+}
 
 #define MAX_DEV_ID	20
 #define MAX_CON_ID	16

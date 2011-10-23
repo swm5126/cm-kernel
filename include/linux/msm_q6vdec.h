@@ -167,7 +167,7 @@ struct vdec_frame_info {
 	u32 concealed_macblk_num;	/* number of concealed macro blk */
 	u32 flags;		/* input flags */
 	u32 performance_stats;	/* performance statistics returned by decoder */
-	u32 data3;              /* user data field 3 */
+	u32 data3;		/* user data field 3 */
 };
 
 struct vdec_buf_info {

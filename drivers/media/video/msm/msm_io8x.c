@@ -330,3 +330,8 @@ int msm_camio_probe_off(struct platform_device *pdev)
 	camdev->camera_gpio_off();
 	return msm_camio_clk_disable(CAMIO_VFE_MDC_CLK);
 }
+
+int msm_camio_csi_config(struct msm_camera_csi_params *csi_params)
+{
+	return 0;
+}

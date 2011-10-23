@@ -33,7 +33,6 @@
 #define ROUTE_TO_USERSPACE 1
 
 struct device diag_device;
-
 #if 1
 #define TRACE(tag, data, len, decode) do {} while (0)
 #else
@@ -79,8 +78,8 @@ static void TRACE(const char *tag, const void *_data, int len, int decode)
 #define RX_REQ_BUF_SZ 8192
 
 /* number of tx/rx requests to allocate */
-#define TX_REQ_NUM 4
-#define RX_REQ_NUM 4
+#define TX_REQ_NUM 32
+#define RX_REQ_NUM 32
 
 struct diag_context {
 	struct usb_function function;
@@ -94,7 +93,7 @@ struct diag_context {
 	spinlock_t req_lock;
 #if ROUTE_TO_USERSPACE
 	struct mutex user_lock;
-#define ID_TABLE_SZ 10 /* keep this small */
+#define ID_TABLE_SZ 20 /* keep this small */
 	struct list_head rx_req_user;
 	wait_queue_head_t read_wq;
 	wait_queue_head_t write_wq;
@@ -195,8 +194,6 @@ static struct usb_descriptor_header *hs_diag_descs[] = {
 	NULL,
 };
 
-/* string descriptors: */
-
 static struct usb_string diag_string_defs[] = {
 	[0].s = "HTC DIAG",
 	{  } /* end of list */
@@ -219,6 +216,7 @@ static inline struct diag_context *func_to_dev(struct usb_function *f)
 	return container_of(f, struct diag_context, function);
 }
 
+static int msm_diag_probe(struct platform_device *pdev);
 static void smd_try_to_send(struct diag_context *ctxt);
 static void smd_diag_notify(void *priv, unsigned event);
 
@@ -334,6 +332,10 @@ static long diag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	unsigned char temp_id_table[ID_TABLE_SZ];
 
 	printk(KERN_INFO "diag:diag_ioctl() cmd=%d\n", cmd);
+#ifdef DIAG_DEBUG
+	printk(KERN_INFO "%s:%s(parent:%s): tgid=%d\n", __func__,
+	current->comm, current->parent->comm, current->tgid);
+#endif
 
 	if (_IOC_TYPE(cmd) != USB_DIAG_IOC_MAGIC)
 		return -ENOTTY;
@@ -343,7 +345,7 @@ static long diag_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (copy_from_user(&tmp_value, argp, sizeof(int)))
 			return -EFAULT;
 		printk(KERN_INFO "diag: enable %d\n", tmp_value);
-		android_enable_function(&_context.function, tmp_value, true);
+		android_enable_function(&_context.function, tmp_value);
 		smd_diag_enable("diag_ioctl", tmp_value);
 		/* force diag_read to return error when disable diag */
 		if (tmp_value == 0)
@@ -408,12 +410,12 @@ static ssize_t diag_read(struct file *fp, char __user *buf,
 		(req = req_get(ctxt, &ctxt->rx_req_user)) || !ctxt->online);
 	mutex_lock(&ctxt->user_lock);
 	if (ret < 0) {
-		pr_err("%s: wait_event_interruptible error %d\n",
+		printk(KERN_INFO "%s: wait_event_interruptible error %d\n",
 			__func__, ret);
 		goto end;
 	}
 	if (!ctxt->online) {
-		/* pr_err("%s: offline\n", __func__); */
+		printk(KERN_INFO "%s: offline\n", __func__);
 		ret = -EIO;
 		goto end;
 	}
@@ -457,13 +459,13 @@ static ssize_t diag_write(struct file *fp, const char __user *buf,
 
 	mutex_lock(&ctxt->user_lock);
 	if (ret < 0) {
-		pr_err("%s: wait_event_interruptible error %d\n",
+		printk(KERN_INFO "%s: wait_event_interruptible error %d\n",
 			__func__, ret);
 		goto end;
 	}
 
 	if (!ctxt->online) {
-		pr_err("%s: offline\n", __func__);
+		printk(KERN_INFO "%s: offline\n", __func__);
 		ret = -EIO;
 		goto end;
 	}
@@ -480,7 +482,7 @@ static ssize_t diag_write(struct file *fp, const char __user *buf,
 		req->length = count;
 		ret = usb_ep_queue(ctxt->in, req, GFP_ATOMIC);
 		if (ret < 0) {
-			pr_err("%s: usb_ep_queue error %d\n", __func__, ret);
+			printk(KERN_INFO "%s: usb_ep_queue error %d\n", __func__, ret);
 			goto end;
 		}
 
@@ -504,7 +506,7 @@ static int diag_open(struct inode *ip, struct file *fp)
 
 	mutex_lock(&ctxt->user_lock);
 	if (ctxt->opened) {
-		pr_err("%s: already opened\n", __func__);
+		printk(KERN_INFO "%s: already opened\n", __func__);
 		rc = -EBUSY;
 		goto done;
 	}
@@ -518,7 +520,6 @@ static int diag_open(struct inode *ip, struct file *fp)
 		}
 	}
 	ctxt->opened = true;
-	/* clear the error latch */
 	ctxt->error = 0;
 
 done:
@@ -568,7 +569,7 @@ static int diag2arm9_open(struct inode *ip, struct file *fp)
 	printk(KERN_INFO "%s\n", __func__);
 	mutex_lock(&ctxt->diag2arm9_lock);
 	if (ctxt->diag2arm9_opened) {
-		pr_err("%s: already opened\n", __func__);
+		printk(KERN_INFO "%s: already opened\n", __func__);
 		rc = -EBUSY;
 		goto done;
 	}
@@ -605,6 +606,7 @@ static int diag2arm9_release(struct inode *ip, struct file *fp)
 	printk(KERN_INFO "%s\n", __func__);
 	mutex_lock(&ctxt->diag2arm9_lock);
 	ctxt->diag2arm9_opened = false;
+	ctxt->is2ARM11 = 0;
 	wake_up(&ctxt->read_arm9_wq);
 	mutex_lock(&ctxt->diag2arm9_read_lock);
 	while ((req = req_get(ctxt, &ctxt->rx_arm9_idle)))
@@ -787,10 +789,17 @@ static void diag_process_hdlc(struct diag_context *ctxt, void *_data, unsigned l
 #endif
 
 #if ROUTE_TO_USERSPACE
-static int if_route_to_userspace(struct diag_context *ctxt, unsigned int cmd_id)
+static int if_route_to_userspace(struct diag_context *ctxt, unsigned int cmd)
 {
 	unsigned long flags;
 	int i;
+	unsigned short tmp;
+	unsigned char cmd_id, cmd_num;
+
+	tmp = (unsigned short)cmd;
+
+	cmd_num = (unsigned char)(tmp >> 8);
+	cmd_id = (unsigned char)(tmp & 0x00ff);
 
 	if (!ctxt->opened || cmd_id == 0)
 		return 0;
@@ -802,13 +811,15 @@ static int if_route_to_userspace(struct diag_context *ctxt, unsigned int cmd_id)
 		return 1;
 
 	spin_lock_irqsave(&ctxt->req_lock, flags);
-	for (i = 0; i < ARRAY_SIZE(ctxt->id_table); i++)
+	for (i = 0; i < ARRAY_SIZE(ctxt->id_table); i = i+2)
 		if (ctxt->id_table[i] == cmd_id) {
 			/* if the command id equals to any of registered ids,
 			 * route to userspace to handle.
 			 */
-			spin_unlock_irqrestore(&ctxt->req_lock, flags);
-			return 1;
+			if (ctxt->id_table[i+1] == cmd_num || ctxt->id_table[i+1] == 0xff) {
+				spin_unlock_irqrestore(&ctxt->req_lock, flags);
+				return 1;
+			}
 		}
 	spin_unlock_irqrestore(&ctxt->req_lock, flags);
 
@@ -822,7 +833,7 @@ static void diag_out_complete(struct usb_ep *ept, struct usb_request *req)
 
 	if (req->status == 0) {
 #if ROUTE_TO_USERSPACE
-		unsigned int cmd_id = *((unsigned char *)req->buf);
+		unsigned int cmd_id = *((unsigned short *)req->buf);
 		if (if_route_to_userspace(ctxt, cmd_id)) {
 			req_put(ctxt, &ctxt->rx_req_user, req);
 			wake_up(&ctxt->read_wq);
@@ -853,7 +864,7 @@ static void diag_queue_out(struct diag_context *ctxt)
 
 	req = req_get(ctxt, &ctxt->rx_req_idle);
 	if (!req) {
-		pr_err("%s: rx req queue - out of buffer\n", __func__);
+		printk(KERN_INFO "%s: rx req queue - out of buffer\n", __func__);
 		return;
 	}
 
@@ -863,7 +874,7 @@ static void diag_queue_out(struct diag_context *ctxt)
 
 	rc = usb_ep_queue(ctxt->out, req, GFP_ATOMIC);
 	if (rc < 0) {
-		pr_err("%s: usb_ep_queue failed: %d\n", __func__, rc);
+		printk(KERN_INFO "%s: usb_ep_queue failed: %d\n", __func__, rc);
 		req_put(ctxt, &ctxt->rx_req_idle, req);
 	}
 }
@@ -901,7 +912,7 @@ again:
 			struct usb_request *req;
 			req = req_get(ctxt, &ctxt->tx_req_idle);
 			if (!req) {
-				pr_err("%s: tx req queue is out of buffers\n",
+				printk(KERN_INFO "%s: tx req queue is out of buffers\n",
 					__func__);
 				return;
 			}
@@ -920,7 +931,7 @@ again:
 			ctxt->in_busy = 1;
 			r = usb_ep_queue(ctxt->in, req, GFP_ATOMIC);
 			if (r < 0) {
-				pr_err("%s: usb_ep_queue failed: %d\n",
+				printk(KERN_INFO "%s: usb_ep_queue failed: %d\n",
 					__func__, r);
 				req_put(ctxt, &ctxt->tx_req_idle, req);
 				ctxt->in_busy = 0;
@@ -934,6 +945,7 @@ static void smd_diag_notify(void *priv, unsigned event)
 	struct diag_context *ctxt = priv;
 	smd_try_to_send(ctxt);
 }
+
 
 static int __init create_bulk_endpoints(struct diag_context *ctxt,
 				struct usb_endpoint_descriptor *in_desc,
@@ -1161,7 +1173,6 @@ static void diag_function_disable(struct usb_function *f)
 	usb_ep_disable(ctxt->in);
 	usb_ep_disable(ctxt->out);
 }
-
 #if defined(CONFIG_MSM_N_WAY_SMD)
 static void diag_qdsp_send(struct diag_context *ctxt)
 {
@@ -1208,17 +1219,6 @@ static void diag_qdsp_notify(void *priv, unsigned event)
 	diag_qdsp_send(ctxt);
 }
 
-static int msm_diag_probe(struct platform_device *pdev)
-{
-	struct diag_context *ctxt = &_context;
-	ctxt->pdev = pdev;
-	printk(KERN_INFO "diag:msm_diag_probe(), pdev->id=0x%x\n", pdev->id);
-
-	if (pdev->id == 1)
-		smd_open("DSP_DIAG", &ctxt->chqdsp, ctxt, diag_qdsp_notify);
-	return 0;
-}
-
 static struct platform_driver msm_smd_qdsp_ch1_driver = {
 	.probe = msm_diag_probe,
 	.driver = {
@@ -1228,11 +1228,27 @@ static struct platform_driver msm_smd_qdsp_ch1_driver = {
 };
 #endif
 
+static int msm_diag_probe(struct platform_device *pdev)
+{
+	struct diag_context *ctxt = &_context;
+	ctxt->pdev = pdev;
+	printk(KERN_INFO "diag:msm_diag_probe(), pdev->id=0x%x\n", pdev->id);
+
+#if defined(CONFIG_MSM_N_WAY_SMD)
+	if (pdev->id == 1)
+		smd_open("DSP_DIAG", &ctxt->chqdsp, ctxt, diag_qdsp_notify);
+#endif
+	return 0;
+}
+
 static int diag_set_enabled(const char *val, struct kernel_param *kp)
 {
 	int enabled = simple_strtol(val, NULL, 0);
+
+	printk(KERN_INFO "%s: %d\n", __func__, enabled);
+
 	if (_context.cdev)
-		android_enable_function(&_context.function, enabled, true);
+		android_enable_function(&_context.function, enabled);
 	_context.function_enable = !!enabled;
 	smd_diag_enable("diag_set_enabled", enabled);
 	return 0;
@@ -1278,7 +1294,12 @@ int diag_bind_config(struct usb_configuration *c)
 	ctxt->function.set_alt = diag_function_set_alt;
 	ctxt->function.disable = diag_function_disable;
 
+/* Workaround: enable diag first */
+#ifdef CONFIG_MACH_MECHA
+	ctxt->function.hidden = 0;
+#else
 	ctxt->function.hidden = !_context.function_enable;
+#endif
 	if (!ctxt->function.hidden)
 		smd_diag_enable("diag_bind_config", 1);
 

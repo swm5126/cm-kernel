@@ -23,10 +23,6 @@
 #include "proc_comm.h"
 #include "smd_private.h"
 
-#ifdef CONFIG_HTC_SLEEP_MODE_GPIO_DUMP
-#include "gpio_dump.h"
-#endif
-
 enum {
 	GPIO_DEBUG_SLEEP = 1U << 0,
 };
@@ -336,32 +332,6 @@ int msm_gpio_configure(struct gpio_chip *chip, unsigned int gpio, unsigned long 
 	unsigned b = 1U << (gpio - chip->start);
 	unsigned v;
 
-#ifdef CONFIG_HTC_SLEEP_MODE_GPIO_DUMP
-	unsigned int gpio_pull = 0, gpio_direction = 0, gpio_owner;
-
-	gpio_owner = readl(htc_smem_gpio_cfg(gpio, 0));
-	gpio_owner = gpio_owner & (0x1 << GPIO_CFG_OWNER);
-
-	if (flags & (GPIOF_INPUT | GPIOF_DRIVE_OUTPUT)) {
-		if (flags & GPIOF_INPUT)
-			gpio_direction = 0;
-		else if (flags & GPIOF_DRIVE_OUTPUT)
-			gpio_direction = 1;
-
-		if (flags & GPIOF_OUTPUT_LOW)
-			gpio_pull = 1;
-		else if (flags & GPIOF_OUTPUT_HIGH)
-			gpio_pull = 3;
-
-		v  = (0 << GPIO_CFG_INVALID) | gpio_owner |
-		    (0 << GPIO_CFG_DRVSTR) | (gpio_pull << GPIO_CFG_PULL) |
-		    (gpio_direction << GPIO_CFG_DIR) |
-		    (1 << GPIO_CFG_RMT) | 0;
-
-		writel(v, htc_smem_gpio_cfg(gpio, 0));
-	}
-#endif
-
 	if (flags & (GPIOF_OUTPUT_LOW | GPIOF_OUTPUT_HIGH))
 		msm_gpio_write(chip, gpio, flags & GPIOF_OUTPUT_HIGH);
 
@@ -545,13 +515,6 @@ static void msm_gpio_sleep_int(unsigned long arg)
 
 static DECLARE_TASKLET(msm_gpio_sleep_int_tasklet, msm_gpio_sleep_int, 0);
 
-#ifdef CONFIG_HTC_SLEEP_MODE_GPIO_DUMP
-unsigned int htc_smem_gpio_cfg(unsigned int num, unsigned int mode)
-{
-	return (unsigned int)(HTC_GPIO_CFG_ADDR(mode) + (num * 0x04));
-}
-#endif
-
 void msm_gpio_enter_sleep(int from_idle)
 {
 	int i;
@@ -568,12 +531,14 @@ void msm_gpio_enter_sleep(int from_idle)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(msm_gpio_chips); i++) {
-		writel(msm_gpio_chips[i].int_enable[!from_idle], msm_gpio_chips[i].regs.int_en);
+		unsigned int int_en = msm_gpio_chips[i].int_enable[!from_idle] & ~msm_gpio_chips[i].int_enable_mask[!from_idle];
+		writel(int_en, msm_gpio_chips[i].regs.int_en);
 		if ((msm_gpio_debug_mask & GPIO_DEBUG_SLEEP) && !from_idle)
-			printk("gpio[%3d,%3d]: int_enable=0x%08x int_edge=0x%8p int_pos=0x%8p\n",
+			printk("gpio[%3d,%3d]: int_enable=0x%08x int_mask_en=0x%08x int_edge=0x%8p int_pos=0x%8p\n",
 				msm_gpio_chips[i].chip.start,
 				msm_gpio_chips[i].chip.end,
 				msm_gpio_chips[i].int_enable[!from_idle],
+				msm_gpio_chips[i].int_enable_mask[!from_idle],
 				msm_gpio_chips[i].regs.int_edge,
 				msm_gpio_chips[i].regs.int_pos);
 		if (smem_gpio) {
@@ -632,8 +597,10 @@ static int __init msm_init_gpio(void)
 	int i, j = 0;
 
 	for (i = FIRST_GPIO_IRQ; i < FIRST_GPIO_IRQ + NR_GPIO_IRQS; i++) {
-		if (i - FIRST_GPIO_IRQ > msm_gpio_chips[j].chip.end)
-			j++;
+		if (i - FIRST_GPIO_IRQ > msm_gpio_chips[j].chip.end) {
+			if (j < ARRAY_SIZE(msm_gpio_chips) - 1)
+				j++;
+		}
 		set_irq_chip_data(i, &msm_gpio_chips[j]);
 		set_irq_chip(i, &msm_gpio_irq_chip);
 		set_irq_handler(i, handle_edge_irq);
@@ -663,13 +630,42 @@ int gpio_configure(unsigned int gpio, unsigned long flags)
 }
 EXPORT_SYMBOL(gpio_configure);
 
+void register_gpio_int_mask(unsigned int gpio, unsigned int idle)
+{
+	unsigned int i;
+	unsigned long irq_flags;
+	for (i = 0; i < ARRAY_SIZE(msm_gpio_chips); i++)
+		if (gpio >= msm_gpio_chips[i].chip.start && gpio <= msm_gpio_chips[i].chip.end) {
+			spin_lock_irqsave(&msm_gpio_chips[i].chip.lock, irq_flags);
+			msm_gpio_chips[i].int_enable_mask[!idle] |= 1U << (gpio - msm_gpio_chips[i].chip.start);
+			spin_unlock_irqrestore(&msm_gpio_chips[i].chip.lock, irq_flags);
+			break;
+		}
+}
+EXPORT_SYMBOL(register_gpio_int_mask);
+
+void unregister_gpio_int_mask(unsigned int gpio, unsigned int idle)
+{
+	unsigned int i;
+	unsigned long irq_flags;
+	for (i = 0; i < ARRAY_SIZE(msm_gpio_chips); i++)
+		if (gpio >= msm_gpio_chips[i].chip.start && gpio <= msm_gpio_chips[i].chip.end) {
+			spin_lock_irqsave(&msm_gpio_chips[i].chip.lock, irq_flags);
+			msm_gpio_chips[i].int_enable_mask[!idle] &= ~(1U << (gpio - msm_gpio_chips[i].chip.start));
+			spin_unlock_irqrestore(&msm_gpio_chips[i].chip.lock, irq_flags);
+			break;
+		}
+}
+EXPORT_SYMBOL(unregister_gpio_int_mask);
+
 void config_gpio_table(uint32_t *table, int len)
 {
 	int n;
 	unsigned id;
 	for (n = 0; n < len; n++) {
 		id = table[n];
-		msm_proc_comm(PCOM_RPC_GPIO_TLMM_CONFIG_EX, &id, 0);
+		if (msm_proc_comm(PCOM_RPC_GPIO_TLMM_CONFIG_EX, &id, 0))
+			printk(KERN_ERR "%s: config gpio fail\n", __func__);
 	}
 }
 EXPORT_SYMBOL(config_gpio_table);

@@ -4,7 +4,7 @@
 
 menuconfig BTPORT
 	bool "BT port support"
-	default y
+	default n
 	---help---
 	  Redirect DUN & SPP driver to a fixed device node
 
@@ -12,7 +12,7 @@ if BTPORT
 
 config BTPORT_DRV
 	tristate "BRCM BT Port Support"
-	default y
+	default n
 	---help---
 
 endif # BTPORT

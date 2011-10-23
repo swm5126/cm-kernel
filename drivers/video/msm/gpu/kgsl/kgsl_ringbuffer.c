@@ -789,8 +789,8 @@ void kgsl_ringbuffer_debug(struct kgsl_ringbuffer *rb,
 			    (unsigned int *)&rb_debug->rbbm_status);
 	kgsl_yamato_regread(rb->device, REG_RBBM_INT_STATUS,
 			    (unsigned int *)&rb_debug->rbbm_int_status);
-	GSL_RB_GET_SOP_TIMESTAMP(rb, (unsigned int *)&rb_debug->sop_timestamp);
-	GSL_RB_GET_EOP_TIMESTAMP(rb, (unsigned int *)&rb_debug->eop_timestamp);
+//	GSL_RB_GET_SOP_TIMESTAMP(rb, (unsigned int *)&rb_debug->sop_timestamp);
+//	GSL_RB_GET_EOP_TIMESTAMP(rb, (unsigned int *)&rb_debug->eop_timestamp);
 
 }
 #endif /*DEBUG*/

@@ -56,7 +56,7 @@ module_param_named(debug_mask, msm_timer_debug_mask, int, S_IRUGO | S_IWUSR | S_
 #ifdef CONFIG_ARCH_MSM7X30
 #define DGT_HZ 6144000 /* Uses LPXO/4 (24.576 MHz / 4) */
 #define MSM_DGT_SHIFT (0)
-#elif CONFIG_ARCH_MSM_SCORPION
+#elif defined(CONFIG_ARCH_MSM_SCORPION)
 #define DGT_HZ (19200000 / 4) /* 19.2 MHz / 4 by default */
 #define MSM_DGT_SHIFT (0)
 #else

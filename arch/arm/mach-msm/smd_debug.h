@@ -18,6 +18,7 @@
 #include <linux/spinlock.h>
 #include <linux/list.h>
 
+#if !defined(CONFIG_ARCH_MSM7X30_LTE)
 struct smd_alloc_elm {
 	char name[20];
 	uint32_t cid;
@@ -38,6 +39,7 @@ struct smd_half_channel {
 	unsigned tail;
 	unsigned head;
 } __attribute__((packed));
+#endif
 
 struct smd_shared_v1 {
 	struct smd_half_channel ch0;

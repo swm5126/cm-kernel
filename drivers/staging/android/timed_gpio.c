@@ -16,6 +16,7 @@
 
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include <linux/hrtimer.h>
 #include <linux/err.h>
 #include <linux/gpio.h>
@@ -23,6 +24,10 @@
 #include "timed_output.h"
 #include "timed_gpio.h"
 
+#define VIB_INFO_LOG(fmt, ...) \
+		printk(KERN_INFO "[VIB]" fmt, ##__VA_ARGS__)
+#define VIB_ERR_LOG(fmt, ...) \
+		printk(KERN_ERR "[VIB][ERR]" fmt, ##__VA_ARGS__)
 
 struct timed_gpio_data {
 	struct timed_output_dev dev;
@@ -37,8 +42,17 @@ static enum hrtimer_restart gpio_timer_func(struct hrtimer *timer)
 {
 	struct timed_gpio_data *data =
 		container_of(timer, struct timed_gpio_data, timer);
+	int rc;
 
-	gpio_direction_output(data->gpio, data->active_low ? 1 : 0);
+	if (!strcmp(data->dev.name, "vibrator"))
+		VIB_INFO_LOG("%s\n", __func__);
+
+	rc = gpio_direction_output(data->gpio, data->active_low ? 1 : 0);
+	if (rc < 0) {
+		if (!strcmp(data->dev.name, "vibrator"))
+			VIB_ERR_LOG("%s:gpio_direction_output failed!\n", __func__);
+	}
+
 	return HRTIMER_NORESTART;
 }
 
@@ -60,14 +74,23 @@ static void gpio_enable(struct timed_output_dev *dev, int value)
 	struct timed_gpio_data	*data =
 		container_of(dev, struct timed_gpio_data, dev);
 	unsigned long	flags;
-
-	spin_lock_irqsave(&data->lock, flags);
+	int rc;
 
 	/* cancel previous timer and set GPIO according to value */
 	hrtimer_cancel(&data->timer);
-	gpio_direction_output(data->gpio, data->active_low ? !value : !!value);
+	spin_lock_irqsave(&data->lock, flags);
 
-	if (value > 0) {
+	printk(KERN_INFO " gpio_enable, %s(parent:%s): vibrates %d msec\n",
+		current->comm, current->parent->comm, value);
+
+	rc = gpio_direction_output(data->gpio, data->active_low ? !value : !!value);
+
+	if (rc < 0) {
+		if (!strcmp(dev->name, "vibrator"))
+			VIB_ERR_LOG("%s:gpio_direction_output failed, value:%d!\n", __func__, value);
+	} else if (value > 0) {
+		if (!strcmp(dev->name, "vibrator"))
+			pr_info("[ATS][set_vibration][successful]\n");
 		if (value > data->max_timeout)
 			value = data->max_timeout;
 

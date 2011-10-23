@@ -12,6 +12,7 @@
 #include <linux/init.h>
 #include <linux/linkage.h>
 #include <asm/assembler.h>
+#include <asm/domain.h>
 #include <asm/asm-offsets.h>
 #include <asm/hwcap.h>
 #include <asm/pgtable-hwdef.h>
@@ -45,7 +46,14 @@ ENTRY(cpu_v7_proc_init)
 ENDPROC(cpu_v7_proc_init)
 
 ENTRY(cpu_v7_proc_fin)
-	mov	pc, lr
+	stmfd	sp!, {lr}
+	cpsid	if				@ disable interrupts
+	bl	v7_flush_kern_cache_all
+	mrc	p15, 0, r0, c1, c0, 0		@ ctrl register
+	bic	r0, r0, #0x1000			@ ...i............
+	bic	r0, r0, #0x0006			@ .............ca.
+	mcr	p15, 0, r0, c1, c0, 0		@ disable caches
+	ldmfd	sp!, {pc}
 ENDPROC(cpu_v7_proc_fin)
 
 /*
@@ -56,8 +64,6 @@ ENDPROC(cpu_v7_proc_fin)
  *	to what would be the reset vector.
  *
  *	- loc   - location to jump to for soft reset
- *
- *	It is assumed that:
  */
 	.align	5
 ENTRY(cpu_v7_reset)
@@ -101,6 +107,11 @@ ENDPROC(cpu_v7_dcache_clean_area)
  */
 ENTRY(cpu_v7_switch_mm)
 #ifdef CONFIG_MMU
+#ifdef CONFIG_EMULATE_DOMAIN_MANAGER_V7
+	ldr	r2, =cpu_v7_switch_mm_private
+	b	emulate_domain_manager_switch_mm
+cpu_v7_switch_mm_private:
+#endif
 	mov	r2, #0
 	ldr	r1, [r1, #MM_CONTEXT_ID]	@ get mm->context.id
 	orr	r0, r0, #TTB_FLAGS
@@ -184,13 +195,14 @@ cpu_v7_name:
  *	It is assumed that:
  *	- cache type register is implemented
  */
-__v7_setup:
+__v7_ca9mp_setup:
 #if defined(CONFIG_SMP) && !defined(CONFIG_ARCH_MSM_SCORPIONMP)
 	mrc	p15, 0, r0, c1, c0, 1
 	tst	r0, #(1 << 6)			@ SMP/nAMP mode enabled?
 	orreq	r0, r0, #(1 << 6) | (1 << 0)	@ Enable SMP/nAMP mode and
 	mcreq	p15, 0, r0, c1, c0, 1		@ TLB ops broadcasting
 #endif
+__v7_setup:
 	adr	r12, __v7_setup_stack		@ the local stack
 	stmia	r12, {r0-r5, r7, r9, r11, lr}
 	bl	v7_flush_dcache_all
@@ -235,21 +247,33 @@ __v7_setup:
 	mcr	p15, 0, r10, c2, c0, 2		@ TTB control register
 	orr	r4, r4, #TTB_FLAGS
 	mcr	p15, 0, r4, c2, c0, 1		@ load TTB1
-#ifdef CONFIG_ARCH_MSM_SCORPION
-#ifdef CONFIG_ARCH_QSD8X50
-	mov     r0, #0x77
-#else
-	mov     r0, #0x33
+#ifndef CONFIG_EMULATE_DOMAIN_MANAGER_V7
+	mov     r10, #0x1f                      @ domains 0, 1 = manager
+	mcr     p15, 0, r10, c3, c0, 0          @ load domain access register
 #endif
+#ifdef CONFIG_ARCH_MSM_SCORPION
+	mov     r0, #0x33
 	mcr     p15, 3, r0, c15, c0, 3          @ set L2CR1
+#endif
+#if defined (CONFIG_ARCH_MSM_SCORPION) || defined (CONFIG_ARCH_MSM_SCORPIONMP)
 	mrc     p15, 0, r0, c1, c0, 1           @ read ACTLR
 #ifdef CONFIG_CPU_CACHE_ERR_REPORT
 	orr     r0, r0, #0x37                   @ turn on L1/L2 error reporting
 #else
 	bic     r0, r0, #0x37
 #endif
+#if defined (CONFIG_ARCH_MSM_SCORPIONMP)
+	orr    r0, r0, #0x1 << 24     @ optimal setting for Scorpion MP
+#endif
 	mcr     p15, 0, r0, c1, c0, 1           @ write ACTLR
 #endif
+
+#if defined (CONFIG_ARCH_MSM_SCORPIONMP)
+	mrc     p15, 3, r0, c15, c0, 2  @ optimal setting for Scorpion MP
+	orr	    r0, r0, #0x1 << 21
+	mcr     p15, 3, r0, c15, c0, 2
+#endif
+
 	/*
 	 * Memory region attributes with SCTLR.TRE=1
 	 *
@@ -279,7 +303,11 @@ __v7_setup:
 	 *   NOS = PRRR[24+n] = 1	- not outer shareable
 	 */
 	ldr	r5, =0xff0a81a8			@ PRRR
+#ifdef CONFIG_ARCH_MSM_SCORPIONMP
+	ldr	r6, =0x40e080e0			@ NMRR
+#else
 	ldr	r6, =0x40e040e0			@ NMRR
+#endif
 	mcr	p15, 0, r5, c10, c2, 0		@ write PRRR
 	mcr	p15, 0, r6, c10, c2, 1		@ write NMRR
 #endif
@@ -333,6 +361,29 @@ cpu_elf_name:
 	.align
 
 	.section ".proc.info.init", #alloc, #execinstr
+
+	.type	__v7_ca9mp_proc_info, #object
+__v7_ca9mp_proc_info:
+	.long	0x410fc090		@ Required ID value
+	.long	0xff0ffff0		@ Mask for ID
+	.long	PMD_TYPE_SECT | \
+		PMD_SECT_AP_WRITE | \
+		PMD_SECT_AP_READ | \
+		PMD_FLAGS
+	.long	PMD_TYPE_SECT | \
+		PMD_SECT_XN | \
+		PMD_SECT_AP_WRITE | \
+		PMD_SECT_AP_READ
+	b	__v7_ca9mp_setup
+	.long	cpu_arch_name
+	.long	cpu_elf_name
+	.long	HWCAP_SWP|HWCAP_HALF|HWCAP_THUMB|HWCAP_FAST_MULT|HWCAP_EDSP
+	.long	cpu_v7_name
+	.long	v7_processor_functions
+	.long	v7wbi_tlb_fns
+	.long	v6_user_fns
+	.long	v7_cache_fns
+	.size	__v7_ca9mp_proc_info, . - __v7_ca9mp_proc_info
 
 	/*
 	 * Match any ARMv7 processor core.

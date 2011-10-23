@@ -162,6 +162,17 @@ static struct q6_device_info q6_audio_devices[] = {
 		.codec	= Q6_ICODEC_RX,
 		.hw	= Q6_HW_SPEAKER,
 	},
+#ifdef CONFIG_QSD_AUDIO_OBOEA
+	{
+		.id	= ADSP_AUDIO_DEVICE_ID_GSM_HANDSET_SPKR,
+		.cad_id	= CAD_HW_DEVICE_ID_TTY_HEADSET_SPKR,
+		.path	= ADIE_PATH_TTY_HEADSET_RX,
+		.rate   = 48000,
+		.dir	= Q6_RX,
+		.codec	= Q6_ICODEC_RX,
+		.hw	= Q6_HW_TTY,
+	},
+#else
 	{
 		.id	= ADSP_AUDIO_DEVICE_ID_TTY_HEADSET_SPKR,
 		.cad_id	= CAD_HW_DEVICE_ID_TTY_HEADSET_SPKR,
@@ -171,6 +182,7 @@ static struct q6_device_info q6_audio_devices[] = {
 		.codec	= Q6_ICODEC_RX,
 		.hw	= Q6_HW_TTY,
 	},
+#endif
 	{
 		.id	= ADSP_AUDIO_DEVICE_ID_HANDSET_MIC,
 		.cad_id	= CAD_HW_DEVICE_ID_HANDSET_MIC,
@@ -198,6 +210,17 @@ static struct q6_device_info q6_audio_devices[] = {
 		.codec	= Q6_ICODEC_TX,
 		.hw	= Q6_HW_SPEAKER,
 	},
+#ifdef CONFIG_QSD_AUDIO_OBOEA
+	{
+		.id	= ADSP_AUDIO_DEVICE_ID_GSM_HANDSET_MIC,
+		.cad_id	= CAD_HW_DEVICE_ID_TTY_HEADSET_MIC,
+		.path	= ADIE_PATH_TTY_HEADSET_TX,
+		.rate   = 8000,
+		.dir	= Q6_TX,
+		.codec	= Q6_ICODEC_TX,
+		.hw	= Q6_HW_HEADSET,
+	},
+#else
 	{
 		.id	= ADSP_AUDIO_DEVICE_ID_TTY_HEADSET_MIC,
 		.cad_id	= CAD_HW_DEVICE_ID_TTY_HEADSET_MIC,
@@ -207,6 +230,7 @@ static struct q6_device_info q6_audio_devices[] = {
 		.codec	= Q6_ICODEC_TX,
 		.hw	= Q6_HW_HEADSET,
 	},
+#endif
 	{
 		.id	= ADSP_AUDIO_DEVICE_ID_BT_SCO_SPKR,
 		.cad_id	= CAD_HW_DEVICE_ID_BT_SCO_SPKR,

@@ -34,7 +34,6 @@
 #include "kgsl_sharedmem.h"
 
 #define DRIVER_NAME "kgsl"
-#define CHIP_REV_251 0x020501
 
 struct kgsl_driver {
 	struct miscdevice misc;

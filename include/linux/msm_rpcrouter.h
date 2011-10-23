@@ -14,6 +14,13 @@
  * GNU General Public License for more details.
  *
  */
+
+#if defined(CONFIG_ARCH_MSM7X30_LTE)
+#include <linux/7x30-lte/msm_rpcrouter.h>
+#elif defined(CONFIG_ARCH_MSM8X60)
+#include <linux/msm_rpcrouter-8x60.h>
+#endif
+
 #ifndef __LINUX_MSM_RPCROUTER_H
 #define __LINUX_MSM_RPCROUTER_H
 

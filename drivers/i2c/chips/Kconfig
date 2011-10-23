@@ -44,6 +44,24 @@ config SENSORS_AKM8975
         help
          AKM8975 Compass Driver implemented by HTC.
 
+config SENSORS_AKM8975_PANA_GYRO
+        tristate "AKM8973 Compass Driver for Pana Gyro"
+        depends on I2C
+        help
+         AKM8975 Compass Driver implemented by HTC.
+
+config SENSORS_CAPSENSE
+	tristate "CapSense Driver"
+	depends on I2C
+	help
+	 CapSense Driver implemented by HTC.
+
+config SENSORS_CAPSENSE_EXPRESS
+	tristate "CapSense Express Driver"
+	depends on I2C
+	help
+	 CapSense Express Driver implemented by HTC.
+
 config SMB329
 	tristate "smb329 Driver"
 	depends on I2C
@@ -67,6 +85,25 @@ config SENSORS_BMA150
 	depends on I2C
 	help
 	 BMA150 G-sensor Driver implemented by HTC.
+
+config SENSORS_BMA250
+	tristate "BMA250 acceleration sensor support"
+	depends on I2C=y
+	help
+	  BMA250 G-sensor Driver implemented by HTC.
+
+config SENSORS_PANASONIC_GYRO
+	tristate "PANASONIC GYRO sensor support"
+	depends on I2C=y
+	help
+	  PANASONIC GYR Driver implemented by HTC.
+
+config SENSORS_NFC_PN544
+	tristate "PN544 NFC sensor support"
+	depends on I2C=y
+	help
+	  PN544 NFC Driver implemented.
+
 config SENSORS_PCA963X
 	tristate "Philips PCA963X 4-bit I2C-bus LED"
 	depends on I2C && EXPERIMENTAL
@@ -90,6 +127,13 @@ config VP_A1026
 	help
 	  A1026 Voice Processor Driver implemented by HTC.
 
+config VP_A1028
+	tristate "A1028 Voice Processor Driver"
+	depends on I2C
+	default n
+	help
+	 A1028 Voice Processor Driver implemented by HTC.
+
 config AMP_TPA6130A
 	tristate "TI TPA6130A Headset AMP Driver"
 	depends on I2C
@@ -108,10 +152,58 @@ config AMP_TPA2051D3
         help
          TI TPA2051D3 Speaker AMP Driver implemented by HTC.
 
+config AMP_TPA2051D3_ON_GPIO
+	tristate "TI TPA2051D3 Speaker AMP Driver on gpio"
+	depends on AMP_TPA2051D3
+	default n
+	help
+	 TI TPA2051D3_ON_GPIO Speaker AMP Driver implemented by HTC.
+
+config AMP_TPA2026
+	tristate "TI TPA2026 Speaker AMP Driver"
+	depends on I2C
+	help
+	 TI TPA2026 Speaker AMP Driver implemented by HTC.
+
+config AMP_TPA2028
+	tristate "TI TPA2028 Speaker AMP Driver"
+	depends on I2C
+	help
+	 TI TPA2028 Speaker AMP Driver implemented by HTC.
+
+config AMP_AK4641
+	tristate "AKM AK4641 Codec Driver"
+	depends on I2C
+	help
+	 AKM AK4641 Codec Driver implemented by HTC.
+
 config INPUT_ISL29028
 	tristate "ISL29028 proximity and light sensor"
 	help
 	  Say Y here to enable the ISL29028 Short Distance Proximity
 	  Sensor with Ambient Light Sensor.
+
+config INPUT_ISL29029
+	tristate "ISL29029 proximity and light sensor"
+	help
+	 Say Y here to enable the ISL29029 Short Distance Proximity
+	 Sensor with Ambient Light Sensor.
+
+config INPUT_CAPELLA_CM3628
+	tristate "CM3628 proximity and light sensor"
+	help
+	  Say Y here to enable the CM3628 Short Distance Proximity
+	  Sensor with Ambient Light Sensor.
+
+config INPUT_CAPELLA_CM3629
+	tristate "CM3629 proximity and light sensor"
+	help
+	  Say Y here to enable the CM3629 Short Distance Proximity
+	  Sensor with Ambient Light Sensor.
+
+config FLASHLIGHT_TPS61310
+	tristate "TI TPS61310 flashlight"
+	help
+	  Say Y here to enable the TI TPS61310 flashlight
 
 endmenu

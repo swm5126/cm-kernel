@@ -1,7 +1,6 @@
 /* drivers/android/pmem.c
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2009, Code Aurora Forum. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -32,8 +31,7 @@
 #define PMEM_MAX_ORDER 128
 #define PMEM_MIN_ALLOC PAGE_SIZE
 
-#define PMEM_DEBUG 0
-//#define PMEM_LOG
+#define PMEM_DEBUG 1
 
 /* indicates that a refernce to this file has been taken via get_pmem_file,
  * the file should not be released until put_pmem_file is called */
@@ -120,6 +118,11 @@ struct pmem_info {
 	struct pmem_bits *bitmap;
 	/* indicates the region should not be managed with an allocator */
 	unsigned no_allocator;
+	int (*allocate)(const int,
+			const unsigned long,
+			const unsigned int);
+	int (*free)(int, int);
+	int (*kapi_free_index)(const int32_t, int);
 	/* indicates maps of this region should be cached, if a mix of
 	 * cached and uncached is desired, set this and open the device with
 	 * O_SYNC to get an uncached region */
@@ -153,6 +156,23 @@ struct pmem_info {
 
 static struct pmem_info pmem[PMEM_MAX_DEVICES];
 static int id_count;
+static struct {
+	const char * const name;
+	const int memtype;
+	const int fallback_memtype;
+	int info_id;
+} kapi_memtypes[] = {
+#ifdef CONFIG_KERNEL_PMEM_SMI_REGION
+	{ PMEM_KERNEL_SMI_DATA_NAME,
+		PMEM_MEMTYPE_SMI,
+		PMEM_MEMTYPE_EBI1,  /* Fall back to EBI1 automatically */
+		-1 },
+#endif
+	{ PMEM_KERNEL_EBI1_DATA_NAME,
+		PMEM_MEMTYPE_EBI1,
+		PMEM_INVALID_MEMTYPE, /* MUST be set invalid if no fallback */
+		-1 },
+};
 
 #define PMEM_IS_FREE(id, index) !(pmem[id].bitmap[index].allocated)
 #define PMEM_ORDER(id, index) pmem[id].bitmap[index].order
@@ -252,8 +272,7 @@ static int pmem_free(int id, int index)
 	 */
 	do {
 		buddy = PMEM_BUDDY_INDEX(id, curr);
-		if (buddy < pmem[id].num_entries &&
-			PMEM_IS_FREE(id, buddy) &&
+		if (PMEM_IS_FREE(id, buddy) &&
 				PMEM_ORDER(id, buddy) == PMEM_ORDER(id, curr)) {
 			PMEM_ORDER(id, buddy)++;
 			PMEM_ORDER(id, curr)++;
@@ -263,15 +282,6 @@ static int pmem_free(int id, int index)
 		}
 	} while (curr < pmem[id].num_entries);
 
-#ifdef PMEM_LOG
-	int i;
-	for(i=0;i<pmem[id].num_entries;i++)
-	if(pmem[id].bitmap[i].order>0 || i>=pmem[id].num_entries ) {
-		printk("free==>index=%d , order=%d , allocated=%d\n",
-			i,pmem[id].bitmap[i].order,
-			pmem[id].bitmap[i].allocated);
-	}
-#endif
 	return 0;
 }
 
@@ -432,7 +442,7 @@ static int pmem_allocate(int id, unsigned long len)
 	 * return an error
 	 */
 	if (best_fit < 0) {
-		printk("pmem: no space left to allocate! %s, pid=%d\n", pmem[id].dev.name, current->pid);
+		printk("pmem: no space left to allocate!\n");
 		return -1;
 	}
 
@@ -606,8 +616,7 @@ static int pmem_mmap(struct file *file, struct vm_area_struct *vma)
 	down_write(&data->sem);
 	/* check this file isn't already mmaped, for submaps check this file
 	 * has never been mmaped */
-	if ((data->flags & PMEM_FLAGS_MASTERMAP) ||
-	    (data->flags & PMEM_FLAGS_SUBMAP) ||
+	if ((data->flags & PMEM_FLAGS_SUBMAP) ||
 	    (data->flags & PMEM_FLAGS_UNSUBMAP)) {
 #if PMEM_DEBUG
 		printk(KERN_ERR "pmem: you can only mmap a pmem file once, "
@@ -623,25 +632,6 @@ static int pmem_mmap(struct file *file, struct vm_area_struct *vma)
 		up_write(&pmem[id].bitmap_sem);
 		data->index = index;
 	}
-
-#ifdef PMEM_LOG
-	int i;
-	int allc_cnt = 0;
-	int order_cnt = 0;
-	for(i=0;i<pmem[id].num_entries;i++)
-		if(pmem[id].bitmap[i].order>0 ||  i>=pmem[id].num_entries) {
-			order_cnt++;
-			if (pmem[id].bitmap[i].allocated > 0) {
-			printk("mmap==>index=%d , order=%d,"
-				"allocated=%d, vbase=0x%8X \n",
-				i,pmem[id].bitmap[i].order,
-				pmem[id].bitmap[i].allocated,
-				vma->vm_start);
-		allc_cnt++;
-		}
-	}
-	printk("allocated/total = %d/%d\n", allc_cnt,order_cnt);
-#endif
 	/* either no space was available or an error occured */
 	if (!has_allocation(file)) {
 		ret = -EINVAL;
@@ -819,9 +809,6 @@ void flush_pmem_file(struct file *file, unsigned long offset, unsigned long len)
 	struct pmem_region_node *region_node;
 	struct list_head *elt;
 	void *flush_start, *flush_end;
-#ifdef CONFIG_OUTER_CACHE
-	unsigned long phy_start, phy_end;
-#endif
 
 	if (!is_pmem_file(file) || !has_allocation(file)) {
 		return;
@@ -837,14 +824,6 @@ void flush_pmem_file(struct file *file, unsigned long offset, unsigned long len)
 	/* if this isn't a submmapped file, flush the whole thing */
 	if (unlikely(!(data->flags & PMEM_FLAGS_CONNECTED))) {
 		dmac_flush_range(vaddr, vaddr + pmem_len(id, data));
-#ifdef CONFIG_OUTER_CACHE
-		phy_start = (unsigned long)vaddr -
-				(unsigned long)pmem[id].vbase + pmem[id].base;
-
-		phy_end  =  phy_start + pmem_len(id, data);
-
-		outer_flush_range(phy_start, phy_end);
-#endif
 		goto end;
 	}
 	/* otherwise, flush the region of the file we are drawing */
@@ -856,21 +835,47 @@ void flush_pmem_file(struct file *file, unsigned long offset, unsigned long len)
 			flush_start = vaddr + region_node->region.offset;
 			flush_end = flush_start + region_node->region.len;
 			dmac_flush_range(flush_start, flush_end);
-#ifdef CONFIG_OUTER_CACHE
-
-			phy_start = (unsigned long)flush_start -
-				(unsigned long)pmem[id].vbase + pmem[id].base;
-
-			phy_end  =  phy_start + region_node->region.len;
-
-			outer_flush_range(phy_start, phy_end);
-#endif
 			break;
 		}
 	}
 end:
 	up_read(&data->sem);
 }
+
+
+int pmem_kfree(const int32_t physaddr)
+{
+	int i;
+	for (i = 0; i < ARRAY_SIZE(kapi_memtypes); i++) {
+		int index;
+		int id = kapi_memtypes[i].info_id;
+
+		if (id < 0)
+			continue;
+
+		if (!pmem[id].allocate) {
+#if PMEM_DEBUG
+			pr_alert("pmem: %s: "
+				"Attempt to free physical address %#x "
+				"from unregistered PMEM kernel region"
+				" %d. Driver/board setup is faulty!",
+				__func__, physaddr, id);
+#endif
+			return -EINVAL;
+		}
+
+		index = pmem[id].kapi_free_index(physaddr, id);
+		if (index >= 0)
+			return pmem[id].free(id, index) ?  -EINVAL : 0;
+	}
+#if PMEM_DEBUG
+	pr_alert("pmem: %s: Failed to free physaddr %#x, does not "
+		"seem be value returned by pmem_kalloc()!",
+		__func__, physaddr);
+#endif
+	return -EINVAL;
+}
+EXPORT_SYMBOL(pmem_kfree);
 
 static int pmem_connect(unsigned long connect, struct file *file)
 {
@@ -953,7 +958,6 @@ lock_mm:
 	 * once */
 	if (PMEM_IS_SUBMAP(data) && !mm) {
 		pmem_unlock_data_and_mm(data, mm);
-		up_write(&data->sem);
 		goto lock_mm;
 	}
 	/* now check that vma.mm is still there, it could have been
@@ -1199,7 +1203,16 @@ static long pmem_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		DLOG("connect\n");
 		return pmem_connect(arg, file);
 		break;
-
+	case PMEM_CACHE_FLUSH:
+		{
+			struct pmem_region region;
+			DLOG("flush\n");
+			if (copy_from_user(&region, (void __user *)arg,
+					   sizeof(struct pmem_region)))
+				return -EFAULT;
+			flush_pmem_file(file, region.offset, region.len);
+			break;
+		}
 	case PMEM_CLEAN_INV_CACHES:
 	case PMEM_CLEAN_CACHES:
 	case PMEM_INV_CACHES:
@@ -1237,7 +1250,6 @@ static long pmem_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 			break;
 		}
-
 	default:
 		if (pmem[id].ioctl)
 			return pmem[id].ioctl(file, cmd, arg);

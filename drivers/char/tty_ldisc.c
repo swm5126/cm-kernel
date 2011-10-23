@@ -34,9 +34,14 @@
 #include <linux/vt_kern.h>
 #include <linux/selection.h>
 
+#include <linux/smp_lock.h>	/* For the moment */
+
 #include <linux/kmod.h>
 #include <linux/nsproxy.h>
 
+#if defined(CONFIG_MSM_SMD0_WQ)
+extern struct workqueue_struct *tty_wq;
+#endif
 /*
  *	This guards the refcounted line discipline lists. The lock
  *	must be taken with irqs off because there are hangup path
@@ -45,6 +50,7 @@
 
 static DEFINE_SPINLOCK(tty_ldisc_lock);
 static DECLARE_WAIT_QUEUE_HEAD(tty_ldisc_wait);
+static DECLARE_WAIT_QUEUE_HEAD(tty_ldisc_idle);
 /* Line disc dispatch table */
 static struct tty_ldisc_ops *tty_ldiscs[NR_LDISCS];
 
@@ -81,6 +87,7 @@ static void put_ldisc(struct tty_ldisc *ld)
 		return;
 	}
 	local_irq_restore(flags);
+	wake_up(&tty_ldisc_idle);
 }
 
 /**
@@ -443,8 +450,16 @@ static void tty_set_termios_ldisc(struct tty_struct *tty, int num)
 static int tty_ldisc_open(struct tty_struct *tty, struct tty_ldisc *ld)
 {
 	WARN_ON(test_and_set_bit(TTY_LDISC_OPEN, &tty->flags));
-	if (ld->ops->open)
-		return ld->ops->open(tty);
+	if (ld->ops->open) {
+		int ret;
+                /* BKL here locks verus a hangup event */
+		lock_kernel();
+		ret = ld->ops->open(tty);
+		if (ret)
+			clear_bit(TTY_LDISC_OPEN, &tty->flags);
+		unlock_kernel();
+		return ret;
+	}
 	return 0;
 }
 
@@ -522,6 +537,23 @@ static int tty_ldisc_halt(struct tty_struct *tty)
 }
 
 /**
+ *	tty_ldisc_wait_idle	-	wait for the ldisc to become idle
+ *	@tty: tty to wait for
+ *
+ *	Wait for the line discipline to become idle. The discipline must
+ *	have been halted for this to guarantee it remains idle.
+ */
+static int tty_ldisc_wait_idle(struct tty_struct *tty)
+{
+	int ret;
+	ret = wait_event_interruptible_timeout(tty_ldisc_idle,
+			atomic_read(&tty->ldisc->users) == 1, 5 * HZ);
+	if (ret < 0)
+		return ret;
+	return ret > 0 ? 0 : -EBUSY;
+}
+
+/**
  *	tty_set_ldisc		-	set line discipline
  *	@tty: the terminal to set
  *	@ldisc: the line discipline
@@ -545,6 +577,7 @@ int tty_set_ldisc(struct tty_struct *tty, int ldisc)
 	if (IS_ERR(new_ldisc))
 		return PTR_ERR(new_ldisc);
 
+	lock_kernel();
 	/*
 	 *	We need to look at the tty locking here for pty/tty pairs
 	 *	when both sides try to change in parallel.
@@ -558,10 +591,12 @@ int tty_set_ldisc(struct tty_struct *tty, int ldisc)
 	 */
 
 	if (tty->ldisc->ops->num == ldisc) {
+		unlock_kernel();
 		tty_ldisc_put(new_ldisc);
 		return 0;
 	}
 
+	unlock_kernel();
 	/*
 	 *	Problem: What do we do if this blocks ?
 	 *	We could deadlock here
@@ -582,6 +617,9 @@ int tty_set_ldisc(struct tty_struct *tty, int ldisc)
 			test_bit(TTY_LDISC_CHANGING, &tty->flags) == 0);
 		mutex_lock(&tty->ldisc_mutex);
 	}
+
+	lock_kernel();
+
 	set_bit(TTY_LDISC_CHANGING, &tty->flags);
 
 	/*
@@ -592,6 +630,8 @@ int tty_set_ldisc(struct tty_struct *tty, int ldisc)
 	tty->receive_room = 0;
 
 	o_ldisc = tty->ldisc;
+
+	unlock_kernel();
 	/*
 	 *	Make sure we don't change while someone holds a
 	 *	reference to the line discipline. The TTY_LDISC bit
@@ -614,15 +654,31 @@ int tty_set_ldisc(struct tty_struct *tty, int ldisc)
 
 	mutex_unlock(&tty->ldisc_mutex);
 
+#if defined(CONFIG_MSM_SMD0_WQ)
+	if (!strcmp(tty->name, "smd0"))
+		flush_workqueue(tty_wq);
+	else
+#endif
 	flush_scheduled_work();
 
+	retval = tty_ldisc_wait_idle(tty);
+
 	mutex_lock(&tty->ldisc_mutex);
+	lock_kernel();
+
+	/* handle wait idle failure locked */
+	if (retval) {
+		tty_ldisc_put(new_ldisc);
+		goto enable;
+	}
+
 	if (test_bit(TTY_HUPPED, &tty->flags)) {
 		/* We were raced by the hangup method. It will have stomped
 		   the ldisc data and closed the ldisc down */
 		clear_bit(TTY_LDISC_CHANGING, &tty->flags);
 		mutex_unlock(&tty->ldisc_mutex);
 		tty_ldisc_put(new_ldisc);
+		unlock_kernel();
 		return -EIO;
 	}
 
@@ -649,6 +705,7 @@ int tty_set_ldisc(struct tty_struct *tty, int ldisc)
 
 	tty_ldisc_put(o_ldisc);
 
+enable:
 	/*
 	 *	Allow ldisc referencing to occur again
 	 */
@@ -660,10 +717,25 @@ int tty_set_ldisc(struct tty_struct *tty, int ldisc)
 	/* Restart the work queue in case no characters kick it off. Safe if
 	   already running */
 	if (work)
+	{
+#if defined(CONFIG_MSM_SMD0_WQ)
+		if (!strcmp(tty->name, "smd0"))
+			queue_delayed_work(tty_wq, &tty->buf.work, 0);
+		else
+#endif
 		schedule_delayed_work(&tty->buf.work, 1);
+	}
 	if (o_work)
+	{
+#if defined(CONFIG_MSM_SMD0_WQ)
+		if (!strcmp(o_tty->name, "smd0"))
+			queue_delayed_work(tty_wq, &o_tty->buf.work, 0);
+		else
+#endif
 		schedule_delayed_work(&o_tty->buf.work, 1);
+	}
 	mutex_unlock(&tty->ldisc_mutex);
+	unlock_kernel();
 	return retval;
 }
 
@@ -693,9 +765,12 @@ static void tty_reset_termios(struct tty_struct *tty)
  *	state closed
  */
 
-static void tty_ldisc_reinit(struct tty_struct *tty, int ldisc)
+static int tty_ldisc_reinit(struct tty_struct *tty, int ldisc)
 {
-	struct tty_ldisc *ld;
+	struct tty_ldisc *ld = tty_ldisc_get(ldisc);
+
+	if (IS_ERR(ld))
+		return -1;
 
 	tty_ldisc_close(tty, tty->ldisc);
 	tty_ldisc_put(tty->ldisc);
@@ -703,10 +778,10 @@ static void tty_ldisc_reinit(struct tty_struct *tty, int ldisc)
 	/*
 	 *	Switch the line discipline back
 	 */
-	ld = tty_ldisc_get(ldisc);
-	BUG_ON(IS_ERR(ld));
 	tty_ldisc_assign(tty, ld);
 	tty_set_termios_ldisc(tty, ldisc);
+
+	return 0;
 }
 
 /**
@@ -768,13 +843,16 @@ void tty_ldisc_hangup(struct tty_struct *tty)
 	   a FIXME */
 	if (tty->ldisc) {	/* Not yet closed */
 		if (reset == 0) {
-			tty_ldisc_reinit(tty, tty->termios->c_line);
-			err = tty_ldisc_open(tty, tty->ldisc);
+
+			if (!tty_ldisc_reinit(tty, tty->termios->c_line))
+				err = tty_ldisc_open(tty, tty->ldisc);
+			else
+				err = 1;
 		}
 		/* If the re-open fails or we reset then go to N_TTY. The
 		   N_TTY open cannot fail */
 		if (reset || err) {
-			tty_ldisc_reinit(tty, N_TTY);
+			BUG_ON(tty_ldisc_reinit(tty, N_TTY));
 			WARN_ON(tty_ldisc_open(tty, tty->ldisc));
 		}
 		tty_ldisc_enable(tty);
@@ -833,6 +911,11 @@ void tty_ldisc_release(struct tty_struct *tty, struct tty_struct *o_tty)
 	 */
 
 	tty_ldisc_halt(tty);
+#if defined(CONFIG_MSM_SMD0_WQ)
+	if (!strcmp(tty->name, "smd0"))
+		flush_workqueue(tty_wq);
+	else
+#endif
 	flush_scheduled_work();
 
 	mutex_lock(&tty->ldisc_mutex);

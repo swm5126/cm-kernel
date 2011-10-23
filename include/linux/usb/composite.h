@@ -36,8 +36,18 @@
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
+#include <linux/switch.h>
 
+/*
+ * USB function drivers should return USB_GADGET_DELAYED_STATUS if they
+ * wish to delay the data/status stages of the control transfer till they
+ * are ready. The control transfer will then be kept from completing till
+ * all the function drivers that requested for USB_GADGET_DELAYED_STAUS
+ * invoke usb_composite_setup_continue().
+ */
+#define USB_GADGET_DELAYED_STATUS       0x7fff	/* Impossibly large value */
 
+struct usb_composite_dev;
 struct usb_configuration;
 
 /**
@@ -100,7 +110,10 @@ struct usb_function {
 	struct usb_descriptor_header	**hs_descriptors;
 
 	struct usb_configuration	*config;
+	/* disabled is zero if the function is enabled */
 	int				hidden;
+	/* indicate gadget is able to bind only in need */
+	int				dynamic;
 
 	/* REVISIT:  bind() functions can be marked __init, which
 	 * makes trouble for section mismatch analysis.  See if
@@ -112,6 +125,8 @@ struct usb_function {
 	int			(*bind)(struct usb_configuration *,
 					struct usb_function *);
 	void			(*unbind)(struct usb_configuration *,
+					struct usb_function *);
+	void			(*release)(struct usb_configuration *,
 					struct usb_function *);
 
 	/* runtime state management */
@@ -128,6 +143,7 @@ struct usb_function {
 	/* private: */
 	/* internals */
 	struct list_head		list;
+	DECLARE_BITMAP(endpoints, 32);
 	struct device			*dev;
 };
 
@@ -137,6 +153,11 @@ int usb_function_deactivate(struct usb_function *);
 int usb_function_activate(struct usb_function *);
 
 int usb_interface_id(struct usb_configuration *, struct usb_function *);
+void usb_interface_id_remove(struct usb_configuration *config, int intrnum);
+
+void usb_function_set_enabled(struct usb_function *, int);
+void usb_function_set_enabled_mute(struct usb_function *, int, bool);
+void usb_composite_force_reset(struct usb_composite_dev *);
 
 /**
  * ep_choose - select descriptor endpoint at current device speed
@@ -284,13 +305,12 @@ struct usb_composite_driver {
 	void			(*suspend)(struct usb_composite_dev *);
 	void			(*resume)(struct usb_composite_dev *);
 
-	void			(*enable_function)(struct usb_function *f, int enable, bool reset);
-
+	void			(*enable_function)(struct usb_function *f, int enable);
 };
 
 extern int usb_composite_register(struct usb_composite_driver *);
 extern void usb_composite_unregister(struct usb_composite_driver *);
-
+extern void usb_composite_setup_continue(struct usb_composite_dev *cdev);
 
 /**
  * struct usb_composite_device - represents one composite usb gadget
@@ -333,6 +353,7 @@ struct usb_composite_dev {
 
 	/* private: */
 	/* internals */
+	unsigned int			suspended:1;
 	struct usb_device_descriptor	desc;
 	struct list_head		configs;
 	struct usb_composite_driver	*driver;
@@ -343,8 +364,24 @@ struct usb_composite_dev {
 	 */
 	unsigned			deactivations;
 
-	/* protects at least deactivation count */
+	/* the composite driver won't complete the control transfer's
+	 * data/status stages till delayed_status is zero.
+	 */
+	int				delayed_status;
+
+	/* protects deactivations and delayed_status counts*/
 	spinlock_t			lock;
+
+	/* switch indicating connected/disconnected state */
+	struct switch_dev		sw_connected;
+	/* switch indicating current configuration */
+	struct switch_dev		sw_config;
+	/* switch indicating Connect_to_PC App only */
+	struct switch_dev		sw_connect2pc;
+	/* current connected state for sw_connected */
+	bool				connected;
+
+	struct work_struct switch_work;
 };
 
 extern int usb_string_id(struct usb_composite_dev *c);

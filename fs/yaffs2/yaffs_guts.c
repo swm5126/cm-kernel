@@ -70,8 +70,9 @@ static int yaffs_UpdateObjectHeader(yaffs_Object *in, const YCHAR *name,
 				int force, int isShrink, int shadows);
 static void yaffs_RemoveObjectFromDirectory(yaffs_Object *obj);
 static int yaffs_CheckStructures(void);
-static int yaffs_DeleteWorker(yaffs_Object *in, yaffs_Tnode *tn, __u32 level,
-			int chunkOffset, int *limit);
+/*static int yaffs_DeleteWorker(yaffs_Object *in, yaffs_Tnode *tn, __u32 level,
+			int chunkOffset, int *limit);*/
+/*Mark the unused function to remove warning message*/
 static int yaffs_DoGenericObjectDeletion(yaffs_Object *in);
 
 static yaffs_BlockInfo *yaffs_GetBlockInfo(yaffs_Device *dev, int blockNo);
@@ -596,7 +597,7 @@ static void yaffs_VerifyObjectHeader(yaffs_Object *obj, yaffs_ObjectHeader *oh, 
 }
 
 
-
+#if 0 /*Mark the unused function to remove warning message*/
 static int yaffs_VerifyTnodeWorker(yaffs_Object *obj, yaffs_Tnode *tn,
 					__u32 level, int chunkOffset)
 {
@@ -641,7 +642,7 @@ static int yaffs_VerifyTnodeWorker(yaffs_Object *obj, yaffs_Tnode *tn,
 	return ok;
 
 }
-
+#endif
 
 static void yaffs_VerifyFile(yaffs_Object *obj)
 {
@@ -1643,7 +1644,7 @@ static int yaffs_FindChunkInGroup(yaffs_Device *dev, int theChunk,
  * Returns 1 if the tree was deleted.
  * Returns 0 if it stopped early due to hitting the limit and the delete is incomplete.
  */
-
+#if 0 /*Mark the unused function to remove warning message*/
 static int yaffs_DeleteWorker(yaffs_Object *in, yaffs_Tnode *tn, __u32 level,
 			      int chunkOffset, int *limit)
 {
@@ -1730,7 +1731,7 @@ static int yaffs_DeleteWorker(yaffs_Object *in, yaffs_Tnode *tn, __u32 level,
 	return 1;
 
 }
-
+#endif
 static void yaffs_SoftDeleteChunk(yaffs_Device *dev, int chunk)
 {
 	yaffs_BlockInfo *theBlock;
@@ -2585,12 +2586,12 @@ int yaffs_RenameObject(yaffs_Object *oldDir, const YCHAR *oldName,
 			 * Note we must disable gc otherwise it can mess up the shadowing.
 			 *
 			 */
-			dev->isDoingGC=1;
+			dev->isDoingGC = 1;
 			yaffs_ChangeObjectName(obj, newDir, newName, force,
 						existingTarget->objectId);
 			existingTarget->isShadowed = 1;
 			yaffs_UnlinkObject(existingTarget);
-			dev->isDoingGC=0;
+			dev->isDoingGC = 0;
 		}
 
 		result = yaffs_ChangeObjectName(obj, newDir, newName, 1, 0);
@@ -3058,7 +3059,7 @@ static int yaffs_GarbageCollectBlock(yaffs_Device *dev, int block,
 	/* Take off the number of soft deleted entries because
 	 * they're going to get really deleted during GC.
 	 */
-	if(dev->gcChunk == 0) /* first time through for this block */
+	if (dev->gcChunk == 0) /* first time through for this block */
 		dev->nFreeChunks -= bi->softDeletions;
 
 	dev->isDoingGC = 1;
@@ -6900,7 +6901,7 @@ static void yaffs_UpdateParent(yaffs_Object *obj)
 	obj->yst_mtime = obj->yst_ctime = Y_CURRENT_TIME;
 
 #if 0
-	yaffs_UpdateObjectHeader(obj,NULL,0,0,0);
+	yaffs_UpdateObjectHeader(obj, NULL, 0, 0, 0);
 #endif
 }
 

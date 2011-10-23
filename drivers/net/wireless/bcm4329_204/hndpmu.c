@@ -114,8 +114,11 @@ si_sdiod_drive_strength_init(si_t *sih, osl_t *osh, uint32 drivestrength)
 				break;
 			}
 		}
-
-		W_REG(osh, &cc->chipcontrol_addr, 1);
+#ifdef HTC_KlocWork
+    if( cc!= NULL )
+    {
+#endif
+        W_REG(osh, &cc->chipcontrol_addr, 1);
 		cc_data_temp = R_REG(osh, &cc->chipcontrol_data);
 		cc_data_temp &= ~str_mask;
 		drivestrength_sel <<= str_shift;
@@ -124,6 +127,9 @@ si_sdiod_drive_strength_init(si_t *sih, osl_t *osh, uint32 drivestrength)
 
 		PMU_MSG(("SDIO: %dmA drive strength selected, set to 0x%08x\n",
 		         drivestrength, cc_data_temp));
+#ifdef HTC_KlocWork
+    } // cc!=NULL
+#endif
 	}
 
 	/* Return to original core */

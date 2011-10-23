@@ -27,6 +27,19 @@ extern void msm_hs_request_clock_on(struct uart_port *uport);
 extern void msm_hs_request_clock_off_locked(struct uart_port *uport);
 extern void msm_hs_request_clock_on_locked(struct uart_port *uport);
 
+/* UART2 */
+extern void msm_hs_uart2_request_clock_off(struct uart_port *uport);
+extern void msm_hs_uart2_request_clock_on(struct uart_port *uport);
+/* uport->lock must be held when calling _locked() */
+extern void msm_hs_uart2_request_clock_off_locked(struct uart_port *uport);
+extern void msm_hs_uart2_request_clock_on_locked(struct uart_port *uport);
+
+/* API for TI_ST */
+extern void ti_msm_hs_request_clock_off(struct uart_port *uport);
+extern void ti_msm_hs_request_clock_on(struct uart_port *uport);
+extern void ti_dc_msm_hs_request_clock_off(struct uart_port *uport);
+extern void ti_dc_msm_hs_request_clock_on(struct uart_port *uport);
+
 /* Optional platform device data for msm_serial_hs driver.
  * Used to configure low power rx wakeup */
 struct msm_serial_hs_platform_data {
@@ -34,7 +47,7 @@ struct msm_serial_hs_platform_data {
 	/* bool: inject char into rx tty on wakeup */
 	unsigned char inject_rx_on_wakeup;
 	char rx_to_inject;
-
+	int (*gpio_config)(int);
 	void (*exit_lpm_cb)(struct uart_port *);
 
 	unsigned char cpu_lock_supported;

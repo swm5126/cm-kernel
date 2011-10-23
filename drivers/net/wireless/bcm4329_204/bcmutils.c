@@ -216,6 +216,14 @@ pktq_pdeq(struct pktq *pq, int prec)
 	struct pktq_prec *q;
 	void *p;
 
+#ifdef HTC_KlocWork
+    if(prec >= PKTQ_MAX_PREC)
+    {
+        myprintf("[HTCKW] pktq_pdeq: prec >= PKTQ_MAX_PREC\n");
+        return NULL;
+    }
+#endif
+
 	ASSERT(prec >= 0 && prec < pq->num_prec);
 
 	q = &pq->q[prec];
@@ -242,7 +250,12 @@ pktq_pdeq_tail(struct pktq *pq, int prec)
 	void *p, *prev;
 
 	ASSERT(prec >= 0 && prec < pq->num_prec);
-
+#ifdef HTC_KlocWork
+    if( (prec < 0) || (prec >= pq->num_prec) || (prec >= PKTQ_MAX_PREC) ) {
+        myprintf("[HTCKW] pktq_pdeq_tail: prec not valid:%d\n", prec);
+        return NULL;
+    }
+#endif
 	q = &pq->q[prec];
 
 	if ((p = q->head) == NULL)
@@ -345,6 +358,10 @@ pktq_deq(struct pktq *pq, int *prec_out)
 	if (pq->len == 0)
 		return NULL;
 
+#ifdef HTC_KlocWork
+    while(pq->hi_prec >= PKTQ_MAX_PREC)
+        pq->hi_prec--;
+#endif
 	while ((prec = pq->hi_prec) > 0 && pq->q[prec].head == NULL)
 		pq->hi_prec--;
 
@@ -416,6 +433,11 @@ pktq_peek(struct pktq *pq, int *prec_out)
 	if (pq->len == 0)
 		return NULL;
 
+#ifdef HTC_KlocWork
+    while(pq->hi_prec >= PKTQ_MAX_PREC)
+        pq->hi_prec--;
+#endif
+
 	while ((prec = pq->hi_prec) > 0 && pq->q[prec].head == NULL)
 		pq->hi_prec--;
 
@@ -477,6 +499,11 @@ pktq_mdeq(struct pktq *pq, uint prec_bmp, int *prec_out)
 
 	if (pq->len == 0)
 		return NULL;
+
+#ifdef HTC_KlocWork
+    while(pq->hi_prec >= PKTQ_MAX_PREC)
+        pq->hi_prec--;
+#endif
 
 	while ((prec = pq->hi_prec) > 0 && pq->q[prec].head == NULL)
 		pq->hi_prec--;

@@ -68,11 +68,8 @@ static void smd_tty_work_func(struct work_struct *work)
 		}
 
 		avail = smd_read_avail(info->ch);
-		if (avail == 0) {
-			tty->low_latency = 0;
-			tty_flip_buffer_push(tty);
+		if (avail == 0)
 			break;
-		}
 
 		ptr = NULL;
 		avail = tty_prepare_flip_string(tty, &ptr, avail);
@@ -138,6 +135,11 @@ static int smd_tty_open(struct tty_struct *tty, struct file *f)
 		/* CIQ Master/Slaver Bridge */
 		name = "SMD_DATA20";
 #endif
+#ifdef CONFIG_BUILD_KDDI
+	} else if (n == 25) {
+		/* RIL requested channel for KDDI radio */
+		name = "SMD_DATA19";
+#endif
 	} else {
 		return -ENODEV;
 	}
@@ -145,15 +147,20 @@ static int smd_tty_open(struct tty_struct *tty, struct file *f)
 	info = smd_tty + n;
 
 	mutex_lock(&smd_tty_lock);
-	wake_lock_init(&info->wake_lock, WAKE_LOCK_SUSPEND, name);
 	tty->driver_data = info;
-
 	if (info->open_count++ == 0) {
+		wake_lock_init(&info->wake_lock, WAKE_LOCK_SUSPEND, name);
 		info->tty = tty;
 		if (info->ch) {
 			smd_kick(info->ch);
 		} else {
 			res = smd_open(name, &info->ch, info, smd_tty_notify);
+#ifdef CONFIG_BUILD_KDDI
+			/* smd bug: channel open is too late to handle
+			 * smd write request */
+			if (n == 25)
+				smd_wait_until_opened(info->ch, 200);
+#endif
 #ifdef CONFIG_ARCH_QSD8X50
 			/* 8x50 smd bug: channel open is too late to handle
 			 * smd write request */
@@ -202,8 +209,11 @@ static int smd_tty_write(struct tty_struct *tty,
 	*/
 	mutex_lock(&smd_tty_lock);
 	avail = smd_write_avail(info->ch);
-	if (len > avail)
+	if (len > avail) {
+		printk(KERN_INFO "%s: buffer full. avail:%d, len:%d\n",
+			__func__, avail, len);
 		len = avail;
+	}
 	ret = smd_write(info->ch, buf, len);
 	mutex_unlock(&smd_tty_lock);
 
@@ -291,6 +301,10 @@ static int __init smd_tty_init(void)
 #ifdef CONFIG_BUILD_CIQ
 	tty_register_device(smd_tty_driver, 26, 0);
 	INIT_WORK(&smd_tty[26].tty_work, smd_tty_work_func);
+#endif
+#ifdef CONFIG_BUILD_KDDI
+	tty_register_device(smd_tty_driver, 25, 0);
+	INIT_WORK(&smd_tty[25].tty_work, smd_tty_work_func);
 #endif
 
 	return 0;

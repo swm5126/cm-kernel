@@ -35,7 +35,8 @@
 #include <wlioctl.h>
 #include <wl_iw.h>
 
-#define WL_ERROR(x) myprintf x
+#define WL_DEFAULT(x) myprintf x
+#define WL_ERROR(x) mywrnprintf x
 #define WL_TRACE(x)
 
 #ifdef CUSTOMER_HW
@@ -79,7 +80,7 @@ int dhd_customer_oob_irq_map(unsigned long *irq_flags_ptr)
 		return (dhd_oob_gpio_num);
 	}
 
-	WL_ERROR(("%s: customer specific Host GPIO number is (%d)\n",
+	WL_DEFAULT(("%s: customer specific Host GPIO number is (%d)\n",
 	         __FUNCTION__, dhd_oob_gpio_num));
 
 	host_oob_irq = sdioh_mmc_irq(dhd_oob_gpio_num);
@@ -102,7 +103,7 @@ dhd_customer_gpio_wlan_ctrl(int onoff)
 #ifdef CUSTOMER_HW2
 			wifi_set_power(0, 0);
 #endif
-			WL_ERROR(("=========== WLAN placed in RESET ========\n"));
+			WL_DEFAULT(("=========== WLAN placed in RESET ========\n"));
 		break;
 
 		case WLAN_RESET_ON:
@@ -114,7 +115,7 @@ dhd_customer_gpio_wlan_ctrl(int onoff)
 #ifdef CUSTOMER_HW2
 			wifi_set_power(1, 0);
 #endif
-			WL_ERROR(("=========== WLAN going back to live  ========\n"));
+			WL_DEFAULT(("=========== WLAN going back to live  ========\n"));
 		break;
 
 		case WLAN_POWER_OFF:

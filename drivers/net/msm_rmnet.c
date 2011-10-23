@@ -34,6 +34,9 @@
 
 #include <mach/msm_smd.h>
 
+#define fcENABLE_FLOW_CTRL      1
+#define LOG_TAG1                "[ETH] "
+#define cTHR_RMNET_FIFO         (2000 * 2)  // Leave space for 2 packets
 /* XXX should come from smd headers */
 #define SMD_PORT_ETHER0 11
 #define POLL_DELAY 1000000 /* 1 second delay interval */
@@ -55,6 +58,11 @@ struct rmnet_private
 	struct delayed_work work;
 #endif
 };
+
+#if fcENABLE_FLOW_CTRL
+int bRmnetFifoFull = 0;
+#endif
+
 
 static int count_this_packet(void *_hdr, int len)
 {
@@ -247,6 +255,27 @@ DEVICE_ATTR(awake_time_ms, 0444, awake_time_show, NULL);
 
 #endif
 
+static void rmnet_check_fifo(struct net_device *dev)
+{
+#if fcENABLE_FLOW_CTRL
+	if (bRmnetFifoFull)
+	{
+		struct rmnet_private *p = netdev_priv(dev);
+		int iAvail = smd_write_avail(p->ch);
+
+		if (iAvail > (smd_total_fifo_size(p->ch) / 2))
+		{
+			pr_devel(LOG_TAG1 "%s@%d: tx resumed\n", __func__, __LINE__);
+			if (netif_carrier_ok(dev))
+				netif_wake_queue(dev);
+			else
+				pr_err(LOG_TAG1 "%s@%d: no netif_carrier_ok\n", __func__, __LINE__);
+			bRmnetFifoFull = 0;
+		}
+	}
+#endif
+}
+
 /* Called in soft-irq context */
 static void smd_net_data_handler(unsigned long arg)
 {
@@ -256,25 +285,26 @@ static void smd_net_data_handler(unsigned long arg)
 	void *ptr = 0;
 	int sz;
 
+	rmnet_check_fifo(dev);
 	for (;;) {
 		sz = smd_cur_packet_size(p->ch);
 		if (sz == 0) break;
 		if (smd_read_avail(p->ch) < sz) break;
 
 		if (sz > 1514) {
-			pr_err("rmnet_recv() discarding %d len\n", sz);
+			pr_err("[RIL] rmnet_recv() discarding %d len\n", sz);
 			ptr = 0;
 		} else {
 			skb = dev_alloc_skb(sz + NET_IP_ALIGN);
 			if (skb == NULL) {
-				pr_err("rmnet_recv() cannot allocate skb\n");
+				pr_err("[RIL] rmnet_recv() cannot allocate skb\n");
 			} else {
 				skb->dev = dev;
 				skb_reserve(skb, NET_IP_ALIGN);
 				ptr = skb_put(skb, sz);
 				wake_lock_timeout(&p->wake_lock, HZ / 2);
 				if (smd_read(p->ch, ptr, sz) != sz) {
-					pr_err("rmnet_recv() smd lied about avail?!");
+					pr_err("[RIL] rmnet_recv() smd lied about avail?!");
 					ptr = 0;
 					dev_kfree_skb_irq(skb);
 				} else {
@@ -293,7 +323,7 @@ static void smd_net_data_handler(unsigned long arg)
 			}
 		}
 		if (smd_read(p->ch, ptr, sz) != sz)
-			pr_err("rmnet_recv() smd lied about avail?!");
+			pr_err("[RIL] rmnet_recv() smd lied about avail?!");
 	}
 }
 
@@ -314,7 +344,7 @@ static int rmnet_open(struct net_device *dev)
 	int r;
 	struct rmnet_private *p = netdev_priv(dev);
 
-	pr_info("rmnet_open()\n");
+	pr_info("[RIL] rmnet_open()\n");
 	if (!p->ch) {
 		r = smd_open(p->chname, &p->ch, dev, smd_net_notify);
 
@@ -328,19 +358,49 @@ static int rmnet_open(struct net_device *dev)
 
 static int rmnet_stop(struct net_device *dev)
 {
-	pr_info("rmnet_stop()\n");
+	pr_info("[RIL] rmnet_stop()\n");
 	netif_stop_queue(dev);
 	return 0;
 }
+
+#if fcENABLE_FLOW_CTRL
+inline void rmnet_Throttle(struct net_device *dev)
+{
+	if (!bRmnetFifoFull)
+	{
+		bRmnetFifoFull = 1;
+		netif_stop_queue(dev);
+	}
+	else
+		pr_warning(LOG_TAG1 "%s@%d: already throttled:%d\n", __func__, __LINE__, bRmnetFifoFull);
+}
+#endif
 
 static int rmnet_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct rmnet_private *p = netdev_priv(dev);
 	smd_channel_t *ch = p->ch;
+#if fcENABLE_FLOW_CTRL
+	int res;
+	int iAvail = smd_write_avail(ch);
+#endif
 
+#if fcENABLE_FLOW_CTRL
+	if ((res = smd_write_atomic(ch, skb->data, skb->len)) != skb->len) {
+		pr_err("rmnet fifo full, dropping packet: %d (%d,%d), fifo size = %d\n", res, skb->len, iAvail, smd_total_fifo_size(ch));
+		rmnet_Throttle(dev);
+#else
 	if (smd_write_atomic(ch, skb->data, skb->len) != skb->len) {
-		pr_err("rmnet fifo full, dropping packet\n");
+		pr_err("[RIL] rmnet fifo full, dropping packet, fifo size = %d\n", smd_total_fifo_size(ch));
+#endif
 	} else {
+#if fcENABLE_FLOW_CTRL
+		if (iAvail < cTHR_RMNET_FIFO)
+		{
+			pr_devel(LOG_TAG1 "rmnet fifo almost full: %d (%d,%d), tx paused\n", res, skb->len, iAvail);
+			rmnet_Throttle(dev);
+		}
+#endif
 		if (count_this_packet(skb->data, skb->len)) {
 			p->stats.tx_packets++;
 			p->stats.tx_bytes += skb->len;
@@ -366,7 +426,7 @@ static void rmnet_set_multicast_list(struct net_device *dev)
 
 static void rmnet_tx_timeout(struct net_device *dev)
 {
-	pr_info("rmnet_tx_timeout()\n");
+	pr_info("[RIL] rmnet_tx_timeout()\n");
 }
 
 static struct net_device_ops rmnet_ops = {
@@ -382,7 +442,8 @@ static void __init rmnet_setup(struct net_device *dev)
 {
 	dev->netdev_ops = &rmnet_ops;
 
-	dev->watchdog_timeo = 20; /* ??? */
+	//dev->watchdog_timeo = 20; /* ??? */
+	dev->watchdog_timeo = (2 * HZ);
 
 	ether_setup(dev);
 

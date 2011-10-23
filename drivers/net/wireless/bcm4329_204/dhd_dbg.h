@@ -29,8 +29,10 @@
 
 #ifdef DHD_DEBUG
 
-#define DHD_ERROR(args)	       do {if ((dhd_msg_level & DHD_ERROR_VAL) && (net_ratelimit())) \
-								myprintf args;} while (0)
+#define DHD_DEFAULT(args)   do {if ((dhd_msg_level & DHD_ERROR_VAL) && (net_ratelimit())) \
+							    myprintf args;} while (0)
+#define DHD_ERROR(args)	    do {if ((dhd_msg_level & DHD_ERROR_VAL) && (net_ratelimit())) \
+								mywrnprintf args;} while (0)
 #define DHD_TRACE(args)		do {if (dhd_msg_level & DHD_TRACE_VAL) myprintf args;} while (0)
 #define DHD_INFO(args)		do {if (dhd_msg_level & DHD_INFO_VAL) myprintf args;} while (0)
 #define DHD_DATA(args)		do {if (dhd_msg_level & DHD_DATA_VAL) myprintf args;} while (0)
@@ -58,7 +60,8 @@
 
 #else /* DHD_DEBUG */
 
-#define DHD_ERROR(args)    	do {if (net_ratelimit()) myprintf args;} while (0)
+#define DHD_DEFAULT(args)   do {if (net_ratelimit()) myprintf args;} while (0)
+#define DHD_ERROR(args)    	do {if (net_ratelimit()) mywrnprintf args;} while (0)
 #define DHD_TRACE(args)
 #define DHD_INFO(args)
 #define DHD_DATA(args)

@@ -519,10 +519,7 @@ int kgsl_yamato_init(struct kgsl_device *device, struct kgsl_devconfig *config)
 	*later in kgsl_yamato_start.
 	*/
 	kgsl_yamato_regwrite(device, REG_RBBM_PM_OVERRIDE1, 0xfffffffe);
-	if (device->chip_id == CHIP_REV_251)
-		kgsl_yamato_regwrite(device, REG_RBBM_PM_OVERRIDE2, 0x000000ff);
-	else
-		kgsl_yamato_regwrite(device, REG_RBBM_PM_OVERRIDE2, 0xffffffff);
+	kgsl_yamato_regwrite(device, REG_RBBM_PM_OVERRIDE2, 0xffffffff);
 
 	kgsl_yamato_regwrite(device, REG_RBBM_SOFT_RESET, 0xFFFFFFFF);
 	msleep(50);
@@ -805,7 +802,7 @@ int kgsl_yamato_idle(struct kgsl_device *device, unsigned int timeout)
 	struct kgsl_mmu_debug mmu_dbg;
 	unsigned int rbbm_status;
 	int idle_count = 0;
-#define IDLE_COUNT_MAX 1000000
+#define IDLE_COUNT_MAX 5000000
 
 	KGSL_DRV_VDBG("enter (device=%p, timeout=%d)\n", device, timeout);
 

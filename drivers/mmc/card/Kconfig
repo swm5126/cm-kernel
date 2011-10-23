@@ -66,3 +66,14 @@ config MMC_TEST
 
 	  This driver is only of interest to those developing or
 	  testing a host driver. Most people should say N here.
+
+config MMC_TI_SDIO_ADAPT
+	bool "Use TI SDIO driver to do EMAPI function"
+	help
+	  TI-1271 driver has its own SDIO driver. we use its SDIO drive
+	  to do EMAPI function.
+
+config MMC_PUSHPULL_INIT
+	bool "Use push pull bus mode to prevent CPU driving strength is not enough"
+	help
+	  For TI-1271 chip. we use it to prevent CPU driving strength is not enough.

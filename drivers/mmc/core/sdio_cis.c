@@ -14,7 +14,7 @@
  */
 
 #include <linux/kernel.h>
-
+#include <linux/slab.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/sdio.h>
@@ -22,6 +22,10 @@
 
 #include "sdio_cis.h"
 #include "sdio_ops.h"
+
+#if defined(CONFIG_MMC_MSM7X00A) || defined(CONFIG_MMC_MSM)
+#include <mach/msm_sdcc.h>
+#endif
 
 static int cistpl_vers_1(struct mmc_card *card, struct sdio_func *func,
 			 const unsigned char *buf, unsigned size)
@@ -176,7 +180,7 @@ static int cistpl_funce(struct mmc_card *card, struct sdio_func *func,
 	if (ret && ret != -EILSEQ) {
 		printk(KERN_ERR "%s: bad CISTPL_FUNCE size %u "
 		       "type %u\n", mmc_hostname(card->host), size, buf[0]);
-	}
+}
 
 	return ret;
 }
@@ -242,8 +246,14 @@ static int sdio_read_cis(struct mmc_card *card, struct sdio_func *func)
 			break;
 
 		/* null entries have no link field or data */
-		if (tpl_code == 0x00)
+		if (tpl_code == 0x00) {
+#if defined(CONFIG_MMC_MSM7X00A) || defined(CONFIG_MMC_MSM)
+			if (is_svlte_type_mmc_card(card))
+				break;
+			else
+#endif
 			continue;
+		}
 
 		ret = mmc_io_rw_direct(card, 0, 0, ptr++, 0, &tpl_link);
 		if (ret)

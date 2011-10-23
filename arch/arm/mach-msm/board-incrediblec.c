@@ -34,6 +34,7 @@
 #include <asm/mach/map.h>
 #include <asm/setup.h>
 #include <mach/htc_headset_mgr.h>
+#include <mach/htc_headset_h2w.h>
 #include <mach/htc_headset_gpio.h>
 #include <mach/htc_headset_microp.h>
 
@@ -72,7 +73,7 @@
 extern unsigned char *get_bt_bd_ram(void);
 #endif
 
-void msm_init_pmic_vibrator(void);
+void msm_init_pmic_vibrator(int);
 extern void __init incrediblec_audio_init(void);
 #ifdef CONFIG_MICROP_COMMON
 void __init incrediblec_microp_init(void);
@@ -262,7 +263,7 @@ static struct capella_cm3602_platform_data capella_cm3602_pdata = {
 static struct htc_headset_microp_platform_data htc_headset_microp_data = {
 	.remote_int		= 1 << 5,
 	.remote_irq		= MSM_uP_TO_INT(5),
-	.remote_enable_pin	= NULL,
+	.remote_enable_pin	= 0,
 	.adc_channel		= 0x01,
 	.adc_remote		= {0, 33, 50, 110, 160, 220},
 };
@@ -376,6 +377,7 @@ static struct android_usb_platform_data android_usb_pdata = {
 	.products = usb_products,
 	.num_functions = ARRAY_SIZE(usb_functions_all),
 	.functions = usb_functions_all,
+	.enable_fast_charge=NULL,
 };
 
 static struct platform_device android_usb_device = {
@@ -607,18 +609,19 @@ static struct platform_device ram_console_device = {
 
 static int incrediblec_atmel_ts_power(int on)
 {
-	printk(KERN_INFO "incrediblec_atmel_ts_power(%d)\n", on);
-	if (on) {
-		gpio_set_value(INCREDIBLEC_GPIO_TP_RST, 0);
-		msleep(5);
+	pr_info("%s: power %d\n", __func__, on);
+
+	if (on == 1) {
 		gpio_set_value(INCREDIBLEC_GPIO_TP_EN, 1);
 		msleep(5);
 		gpio_set_value(INCREDIBLEC_GPIO_TP_RST, 1);
+	} else if (on == 2) {
+		gpio_set_value(INCREDIBLEC_GPIO_TP_RST, 0);
+		msleep(5);
+		gpio_set_value(INCREDIBLEC_GPIO_TP_RST, 1);
 		msleep(40);
-	} else {
-		gpio_set_value(INCREDIBLEC_GPIO_TP_EN, 0);
-		msleep(2);
 	}
+
 	return 0;
 }
 
@@ -640,10 +643,11 @@ struct atmel_i2c_platform_data incrediblec_atmel_ts_data[] = {
 		.config_T8 = {10, 0, 20, 10, 0, 0, 5, 15},
 		.config_T9 = {139, 0, 0, 18, 12, 0, 16, 38, 3, 7, 0, 5, 2, 15, 2, 10, 25, 5, 0, 0, 0, 0, 0, 0, 0, 0, 159, 47, 149, 81, 40},
 		.config_T15 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		.config_T19 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T18 = {0, 0},
+		.config_T19 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T20 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T22 = {15, 0, 0, 0, 0, 0, 0, 0, 16, 0, 1, 0, 7, 18, 25, 30, 0},
-		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T24 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T25 = {3, 0, 200, 50, 64, 31, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T27 = {0, 0, 0, 0, 0, 0, 0},
@@ -670,10 +674,11 @@ struct atmel_i2c_platform_data incrediblec_atmel_ts_data[] = {
 		.config_T8 = {12, 0, 20, 20, 0, 0, 20, 0},
 		.config_T9 = {139, 0, 0, 18, 12, 0, 32, 40, 2, 7, 0, 5, 2, 0, 2, 10, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 159, 47, 149, 81},
 		.config_T15 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		.config_T19 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T18 = {0, 0},
+		.config_T19 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T20 = {7, 0, 0, 0, 0, 0, 0, 30, 20, 4, 15, 5},
 		.config_T22 = {7, 0, 0, 25, 0, -25, 255, 4, 50, 0, 1, 10, 15, 20, 25, 30, 4},
-		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T24 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T25 = {3, 0, 200, 50, 64, 31, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T27 = {0, 0, 0, 0, 0, 0, 0},
@@ -697,10 +702,11 @@ struct atmel_i2c_platform_data incrediblec_atmel_ts_data[] = {
 		.config_T8 = {12, 0, 20, 20, 0, 0, 10, 15},
 		.config_T9 = {3, 0, 0, 18, 12, 0, 48, 45, 2, 7, 0, 0, 0, 0, 2, 10, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 143, 47, 143, 81},
 		.config_T15 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		.config_T19 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T18 = {0, 0},
+		.config_T19 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T20 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T22 = {5, 0, 0, 25, 0, -25, 255, 4, 50, 0, 1, 10, 15, 20, 25, 30, 4},
-		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T24 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T25 = {3, 0, 200, 50, 64, 31, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T27 = {0, 0, 0, 0, 0, 0, 0},
@@ -756,6 +762,7 @@ static struct regulator_init_data tps65023_data[5] = {
 	},
 };
 
+#if 0 /* H2W */
 static void set_h2w_dat(int n)
 {
 	gpio_set_value(INCREDIBLEC_GPIO_H2W_DATA, n);
@@ -835,7 +842,6 @@ static void set_h2w_clk_dir(int n)
 #endif
 }
 
-
 static void incrediblec_config_serial_debug_gpios(void);
 
 static void h2w_configure(int route)
@@ -855,6 +861,7 @@ static void h2w_configure(int route)
 		break;
 	}
 }
+#endif /* H2W */
 
 static struct htc_headset_mgr_platform_data htc_headset_mgr_data = {
 };
@@ -869,8 +876,8 @@ static struct platform_device htc_headset_mgr = {
 
 static struct htc_headset_gpio_platform_data htc_headset_gpio_data = {
 	.hpin_gpio		= INCREDIBLEC_GPIO_35MM_HEADSET_DET,
-	.key_enable_gpio	= NULL,
-	.mic_select_gpio	= NULL,
+	.key_enable_gpio	= 0,
+	.mic_select_gpio	= 0,
 };
 
 static struct platform_device htc_headset_gpio = {
@@ -916,14 +923,12 @@ static struct i2c_board_info i2c_devices[] = {
 		.platform_data = &compass_platform_data,
 		.irq = MSM_GPIO_TO_INT(INCREDIBLEC_GPIO_COMPASS_INT_N),
 	},
-#ifdef CONFIG_MSM_CAMERA
-#ifdef CONFIG_OV8810
 	{
 		I2C_BOARD_INFO("ov8810", 0x6C >> 1),
 	},
-#endif
-#endif/*CONIFIG_MSM_CAMERA*/
-
+	{
+		I2C_BOARD_INFO("s5k3h1gx", 0x20 >> 1),
+	},
 	{
 		I2C_BOARD_INFO(TPA6130_I2C_NAME, 0xC0 >> 1),
 		.platform_data = &headset_amp_platform_data,
@@ -950,26 +955,8 @@ module_param_string(bdaddress, bdaddress, sizeof(bdaddress), S_IWUSR | S_IRUGO);
 MODULE_PARM_DESC(bdaddress, "BT MAC ADDRESS");
 #endif
 
-static uint32_t camera_off_gpio_table[] = {
 
-#if 0	/* CAMERA OFF*/
-	PCOM_GPIO_CFG(0, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT0 */
-	PCOM_GPIO_CFG(1, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT1 */
-	PCOM_GPIO_CFG(2, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT2 */
-	PCOM_GPIO_CFG(3, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT3 */
-	PCOM_GPIO_CFG(4, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT4 */
-	PCOM_GPIO_CFG(5, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT5 */
-	PCOM_GPIO_CFG(6, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT6 */
-	PCOM_GPIO_CFG(7, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT7 */
-	PCOM_GPIO_CFG(8, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT8 */
-	PCOM_GPIO_CFG(9, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT9 */
-	PCOM_GPIO_CFG(10, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT10 */
-	PCOM_GPIO_CFG(11, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* DAT11 */
-	PCOM_GPIO_CFG(12, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* PCLK */
-	PCOM_GPIO_CFG(13, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* HSYNC */
-	PCOM_GPIO_CFG(14, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_4MA), /* VSYNC */
-	PCOM_GPIO_CFG(15, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_4MA), /* MCLK */
-#endif
+static uint32_t camera_off_gpio_table[] = {
 	/* CAMERA SUSPEND*/
 	PCOM_GPIO_CFG(0, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_4MA), /* DAT0 */
 	PCOM_GPIO_CFG(1, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_4MA), /* DAT1 */
@@ -1051,6 +1038,27 @@ static int flashlight_control(int mode)
 	return aat1271_flashlight_control(mode);
 }
 
+enum msm_camera_source camera_source;
+static void camera_set_source(enum msm_camera_source source)
+{
+	camera_source = source;
+}
+
+enum msm_camera_source camera_get_source(void){
+	return camera_source;
+}
+
+static int camera_main_probed = 0;
+static int camera_main_get_probe(void)
+{
+	return camera_main_probed;
+}
+static void camera_main_set_probe(int probed)
+{
+	camera_main_probed = probed;
+}
+
+
 static struct camera_flash_cfg msm_camera_sensor_flash_cfg = {
 	.camera_flash		= flashlight_control,
 	.num_flash_levels	= FLASHLIGHT_NUM,
@@ -1058,10 +1066,37 @@ static struct camera_flash_cfg msm_camera_sensor_flash_cfg = {
 	.low_cap_limit		= 15,
 };
 
+/*samsung for 2nd source main camera*/
+static struct msm_camera_sensor_info msm_camera_sensor_s5k3h1_data = {
+	.sensor_name    = "s5k3h1gx",
+	.sensor_reset   = INCREDIBLEC_CAM_RST,
+	.sensor_pwd     = INCREDIBLEC_CAM_PWD,
+	.camera_set_source = camera_set_source,
+	.camera_main_get_probe = camera_main_get_probe,
+	.camera_main_set_probe = camera_main_set_probe,
+	.pdata = &msm_camera_device_data,
+	.resource = msm_camera_resources,
+	.num_resources = ARRAY_SIZE(msm_camera_resources),
+	.waked_up	= 0,
+	.need_suspend	= 0,
+	.flash_cfg	= &msm_camera_sensor_flash_cfg,
+};
+
+static struct platform_device msm_camera_sensor_s5k3h1 = {
+    .name           = "msm_camera_s5k3h1gx",
+    .dev            = {
+    .platform_data = &msm_camera_sensor_s5k3h1_data,
+    },
+};
+
+
 static struct msm_camera_sensor_info msm_camera_sensor_ov8810_data = {
 	.sensor_name    = "ov8810",
-	.sensor_reset   = INCREDIBLEC_CAM_RST, /* CAM1_RST */
-	.sensor_pwd     = INCREDIBLEC_CAM_PWD,  /* CAM1_PWDN, enabled in a9 */
+	.sensor_reset   = INCREDIBLEC_CAM_RST,
+	.sensor_pwd     = INCREDIBLEC_CAM_PWD,
+	.camera_set_source = camera_set_source,
+	.camera_main_get_probe = camera_main_get_probe,
+	.camera_main_set_probe = camera_main_set_probe,
 	.pdata		= &msm_camera_device_data,
 	.resource	= msm_camera_resources,
 	.num_resources	= ARRAY_SIZE(msm_camera_resources),
@@ -1172,6 +1207,7 @@ static struct curcial_oj_platform_data incrediblec_oj_data = {
 	.x 		= 1,
 	.y		= 1,
 	.share_power	= true,
+	.reset_pin = false,
 	.Xsteps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
 		9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
 		9, 9, 9, 9, 9, 9, 9, 9, 9, 9},
@@ -1182,6 +1218,7 @@ static struct curcial_oj_platform_data incrediblec_oj_data = {
 	.pxsum_tbl = {0, 0, 40, 50, 60, 70},
 	.degree = 6,
 	.irq = MSM_uP_TO_INT(12),
+	.device_id = 0x0D,
 };
 
 static struct platform_device incrediblec_oj = {
@@ -1418,6 +1455,7 @@ static struct platform_device *devices[] __initdata = {
 	&android_pmem_camera_device,
 #endif
 	&msm_camera_sensor_ov8810,
+	&msm_camera_sensor_s5k3h1,
 	&msm_kgsl_device,
 	&msm_device_i2c,
 	&incrediblec_flashlight_device,
@@ -1429,6 +1467,7 @@ static struct platform_device *devices[] __initdata = {
 	&incrediblec_oj,
 };
 
+#if 0 /* H2W */
 static uint32_t incrediblec_serial_debug_table[] = {
 	/* RX */
 	PCOM_GPIO_CFG(INCREDIBLEC_GPIO_UART3_RX, 3, GPIO_INPUT, GPIO_NO_PULL,
@@ -1437,6 +1476,7 @@ static uint32_t incrediblec_serial_debug_table[] = {
 	PCOM_GPIO_CFG(INCREDIBLEC_GPIO_UART3_TX, 3, GPIO_OUTPUT, GPIO_NO_PULL,
 		      GPIO_4MA),
 };
+#endif /* H2W */
 
 static uint32_t incrediblec_uart_gpio_table[] = {
         /* RX */
@@ -1447,11 +1487,13 @@ static uint32_t incrediblec_uart_gpio_table[] = {
                       GPIO_4MA),
 };
 
+#if 0 /* H2W */
 static void incrediblec_config_serial_debug_gpios(void)
 {
 	config_gpio_table(incrediblec_serial_debug_table,
 				ARRAY_SIZE(incrediblec_serial_debug_table));
 }
+#endif /* H2W */
 
 static void incrediblec_config_uart_gpios(void)
 {
@@ -1593,6 +1635,7 @@ static void __init incrediblec_init(void)
 
 	printk("incrediblec_init() revision=%d, engineerid=%d\n", system_rev, engineerid);
 
+	/* Must set msm_hw_reset_hook before first proc comm */
 	 msm_hw_reset_hook = incrediblec_reset;
 
 	if (0 == engineerid || 0xF == engineerid) {
@@ -1674,7 +1717,7 @@ static void __init incrediblec_init(void)
 	if (!properties_kobj || ret)
 		pr_err("failed to create board_properties\n");
 
-	msm_init_pmic_vibrator();
+	msm_init_pmic_vibrator(3000);
 
 }
 

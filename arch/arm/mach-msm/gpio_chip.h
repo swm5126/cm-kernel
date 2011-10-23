@@ -64,6 +64,7 @@ struct msm_gpio_chip {
 #endif
 	unsigned int            both_edge_detect;
 	unsigned int            int_enable[2]; /* 0: awake, 1: sleep */
+	unsigned int            int_enable_mask[2]; /* 0: awake, 1: sleep */
 };
 
 int register_gpio_chip(struct gpio_chip *gpio_chip);

@@ -12,7 +12,7 @@
  * GNU General Public License for more details.
  *
  */
-
+#include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mtd/mtd.h>
@@ -28,6 +28,8 @@
 #include <asm/mach/flash.h>
 
 #include <mach/dma.h>
+
+unsigned crci_mask;
 
 #if defined(CONFIG_ARCH_MSM7X30)
 #define MSM_NAND_BASE 0xA0200000
@@ -176,6 +178,11 @@ static void *msm_nand_get_dma_buffer(struct msm_nand_chip *chip, size_t size)
 	do {
 		free_index = __ffs(free_bitmask);
 		current_need_mask = need_mask << free_index;
+
+		if (size + free_index * MSM_NAND_DMA_BUFFER_SLOTS >=
+						MSM_NAND_DMA_BUFFER_SIZE)
+			return NULL;
+
 		if ((bitmask & current_need_mask) == 0) {
 			old_bitmask =
 				atomic_cmpxchg(&chip->dma_buffer_busy,
@@ -260,7 +267,7 @@ uint32_t flash_read_id(struct msm_nand_chip *chip)
 
 	dsb();
 	msm_dmov_exec_cmd(
-		chip->dma_channel, DMOV_CMD_PTR_LIST |
+		chip->dma_channel, crci_mask, DMOV_CMD_PTR_LIST |
 		DMOV_CMD_ADDR(msm_virt_to_dma(chip, &dma_buffer->cmdptr)));
 	dsb();
 
@@ -304,7 +311,7 @@ int flash_read_config(struct msm_nand_chip *chip)
 
 	dsb();
 	msm_dmov_exec_cmd(
-		chip->dma_channel, DMOV_CMD_PTR_LIST |
+		chip->dma_channel, crci_mask, DMOV_CMD_PTR_LIST |
 		DMOV_CMD_ADDR(msm_virt_to_dma(chip, &dma_buffer->cmdptr)));
 	dsb();
 
@@ -344,7 +351,7 @@ unsigned flash_rd_reg(struct msm_nand_chip *chip, unsigned addr)
 
 	dsb();
 	msm_dmov_exec_cmd(
-		chip->dma_channel, DMOV_CMD_PTR_LIST |
+		chip->dma_channel, crci_mask, DMOV_CMD_PTR_LIST |
 		DMOV_CMD_ADDR(msm_virt_to_dma(chip, &dma_buffer->cmdptr)));
 	dsb();
 	rv = dma_buffer->data;
@@ -377,7 +384,7 @@ void flash_wr_reg(struct msm_nand_chip *chip, unsigned addr, unsigned val)
 
 	dsb();
 	msm_dmov_exec_cmd(
-		chip->dma_channel, DMOV_CMD_PTR_LIST |
+		chip->dma_channel, crci_mask, DMOV_CMD_PTR_LIST |
 		DMOV_CMD_ADDR(msm_virt_to_dma(chip, &dma_buffer->cmdptr)));
 	dsb();
 
@@ -670,7 +677,7 @@ static int msm_nand_read_oob(struct mtd_info *mtd, loff_t from,
 
 	dsb();
 		msm_dmov_exec_cmd(
-			chip->dma_channel, DMOV_CMD_PTR_LIST | DMOV_CMD_ADDR(
+			chip->dma_channel, crci_mask, DMOV_CMD_PTR_LIST | DMOV_CMD_ADDR(
 				msm_virt_to_dma(chip, &dma_buffer->cmdptr)));
 	dsb();
 
@@ -1064,7 +1071,7 @@ msm_nand_write_oob(struct mtd_info *mtd, loff_t to, struct mtd_oob_ops *ops)
 			CMD_PTR_LP;
 
 		dsb();
-		msm_dmov_exec_cmd(chip->dma_channel,
+		msm_dmov_exec_cmd(chip->dma_channel, crci_mask,
 			DMOV_CMD_PTR_LIST | DMOV_CMD_ADDR(
 				msm_virt_to_dma(chip, &dma_buffer->cmdptr)));
 		dsb();
@@ -1216,7 +1223,7 @@ msm_nand_erase(struct mtd_info *mtd, struct erase_info *instr)
 
 	dsb();
 	msm_dmov_exec_cmd(
-		chip->dma_channel, DMOV_CMD_PTR_LIST |
+		chip->dma_channel, crci_mask, DMOV_CMD_PTR_LIST |
 		DMOV_CMD_ADDR(msm_virt_to_dma(chip, &dma_buffer->cmdptr)));
 	dsb();
 
@@ -1359,7 +1366,7 @@ msm_nand_block_isbad(struct mtd_info *mtd, loff_t ofs)
 				dma_buffer->cmd) >> 3) | CMD_PTR_LP;
 
 	dsb();
-	msm_dmov_exec_cmd(chip->dma_channel, DMOV_CMD_PTR_LIST |
+	msm_dmov_exec_cmd(chip->dma_channel, crci_mask, DMOV_CMD_PTR_LIST |
 		DMOV_CMD_ADDR(msm_virt_to_dma(chip, &dma_buffer->cmdptr)));
 	dsb();
 
@@ -1432,19 +1439,24 @@ module_param_call(vendor, NULL, param_get_vendor_name, NULL, S_IRUGO);
 static int param_get_nand_info(char *buffer, struct kernel_param *kp)
 {
 	int result = 0;
-	result += sprintf(buffer, "<<  NAND INFO  >>\n");
-	result += sprintf(buffer + result, "flash id\t =%X\n",
+
+	if (nand_info) {
+		result += sprintf(buffer, "<<  NAND INFO  >>\n");
+		result += sprintf(buffer + result, "flash id\t =%X\n",
 				nand_info->flash_id);
-	result += sprintf(buffer + result, "vendor\t\t =%s\n",
+		result += sprintf(buffer + result, "vendor\t\t =%s\n",
 				nand_info->maker_name);
-	result += sprintf(buffer + result, "width\t\t =%d bits\n",
+		result += sprintf(buffer + result, "width\t\t =%d bits\n",
 				nand_info->width);
-	result += sprintf(buffer + result, "size\t\t =%d MB\n",
+		result += sprintf(buffer + result, "size\t\t =%d MB\n",
 				nand_info->size>>20);
-	result += sprintf(buffer + result, "block count\t =%d\n",
+		result += sprintf(buffer + result, "block count\t =%d\n",
 				nand_info->block_count);
-	result += sprintf(buffer + result, "page count\t =%d",
+		result += sprintf(buffer + result, "page count\t =%d",
 				nand_info->page_count);
+	} else {
+		result += sprintf(buffer, "No NAND Flash\n");
+	}
 	return result;
 }
 module_param_call(info, NULL, param_get_nand_info, NULL, S_IRUGO);
@@ -1677,6 +1689,9 @@ static int __devinit msm_nand_probe(struct platform_device *pdev)
 
 	pr_info("msm_nand: allocated dma buffer at %p, dma_addr %x\n",
 		info->msm_nand.dma_buffer, info->msm_nand.dma_addr);
+
+	crci_mask = msm_dmov_build_crci_mask(2,
+			DMOV_NAND_CRCI_DATA, DMOV_NAND_CRCI_CMD);
 
 	info->mtd.name = dev_name(&pdev->dev);
 	info->mtd.priv = &info->msm_nand;

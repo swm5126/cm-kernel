@@ -18,6 +18,7 @@
 
 #include <linux/uaccess.h>
 #include <linux/interrupt.h>
+#include <linux/slab.h>
 #include <mach/irqs.h>
 #include <linux/clk.h>
 #include "msm_vfe8x_proc.h"
@@ -49,13 +50,13 @@ static int vfe_init(struct msm_vfe_callback *presp, struct platform_device *dev)
 
 	ebi1_clk = clk_get(NULL, clk_name);
 	if (!ebi1_clk) {
-		pr_err("%s: could not get %s\n", __func__, clk_name);
+		pr_err("[CAM]%s: could not get %s\n", __func__, clk_name);
 		return -EIO;
 	}
 
 	rc = clk_set_rate(ebi1_clk, 128000000);
 	if (rc < 0) {
-		pr_err("%s: clk_set_rate(%s) failed: %d\n", __func__,
+		pr_err("[CAM]%s: clk_set_rate(%s) failed: %d\n", __func__,
 			clk_name, rc);
 		return rc;
 	}
@@ -198,11 +199,11 @@ static void vfe_config_axi(int mode,
 }
 
 #define ERR_COPY_FROM_USER() \
-	pr_err("%s(%d): copy from user\n", __func__, __LINE__)
+	pr_err("[CAM]%s(%d): copy from user\n", __func__, __LINE__)
 
 #define CHECKED_COPY_FROM_USER(in) {					\
 	if (cmd->length != sizeof(*(in))) {				\
-		pr_err("msm_camera: %s:%d cmd %d: user data size %d "	\
+		pr_err("[CAM]msm_camera: %s:%d cmd %d: user data size %d "	\
 			"!= kernel data size %d\n",			\
 			__func__, __LINE__,				\
 			cmd->id, cmd->length, sizeof(*(in)));		\
@@ -262,7 +263,7 @@ static int vfe_proc_general(struct msm_vfe_command_8k *cmd)
 			    kmalloc(sizeof(struct vfe_cmd_roll_off_config),
 				    GFP_KERNEL);
 			if (!rolloff) {
-				pr_err("%s: out of memory\n", __func__);
+				pr_err("[CAM]%s: out of memory\n", __func__);
 				rc = -ENOMEM;
 				break;
 			}
@@ -576,7 +577,7 @@ static int vfe_proc_general(struct msm_vfe_command_8k *cmd)
 */
 
 	default:
-		pr_err("%s: invalid cmd id %d\n", __func__, cmd->id);
+		pr_err("[CAM]%s: invalid cmd id %d\n", __func__, cmd->id);
 		rc = -EINVAL;
 		break;
 	}			/* switch */
@@ -776,7 +777,7 @@ static int vfe_config(struct msm_vfe_cfg_cmd *cmd, void *data)
 
 			if (copy_from_user(&axio, (void __user *)(vfecmd.value),
 				sizeof(axio))) {
-				pr_err("%s %d: copy_from_user failed\n",
+				pr_err("[CAM]%s %d: copy_from_user failed\n",
 					__func__, __LINE__);
 			return -EFAULT;
 		}
@@ -794,7 +795,7 @@ static int vfe_config(struct msm_vfe_cfg_cmd *cmd, void *data)
 
 			if (copy_from_user(&axio, (void __user *)(vfecmd.value),
 				sizeof(axio))) {
-				pr_err("%s %d: copy_from_user failed\n",
+				pr_err("[CAM]%s %d: copy_from_user failed\n",
 					__func__, __LINE__);
 			return -EFAULT;
 		}
@@ -809,7 +810,7 @@ static int vfe_config(struct msm_vfe_cfg_cmd *cmd, void *data)
 
 			if (copy_from_user(&axio, (void __user *)(vfecmd.value),
 				sizeof(axio))) {
-				pr_err("%s %d: copy_from_user failed\n",
+				pr_err("[CAM]%s %d: copy_from_user failed\n",
 					__func__, __LINE__);
 			return -EFAULT;
 		}

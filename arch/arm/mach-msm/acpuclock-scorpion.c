@@ -97,6 +97,7 @@ struct clkctl_acpu_speed acpu_freq_tbl[] = {
 	{ 998400, CCTL(CLK_TCXO, 1),		SRC_SCPLL, 0x1A, 0, 1300, 128000 },
 	{ 0 },
 };
+static unsigned long max_axi_rate;
 
 /* select the standby clock that is used when switching scpll
  * frequencies
@@ -512,7 +513,16 @@ static void __init acpuclk_init(void)
 					   init_khz, speed->acpu_khz);
 
 	loops_per_jiffy = drv_state.current_speed->lpj;
+
+	speed = acpu_freq_tbl + ARRAY_SIZE(acpu_freq_tbl) - 2;
+	max_axi_rate = speed->axiclk_khz * 1000;
 }
+
+unsigned long acpuclk_get_max_axi_rate(void)
+{
+	return max_axi_rate;
+}
+EXPORT_SYMBOL(acpuclk_get_max_axi_rate);
 
 unsigned long acpuclk_get_rate(void)
 {

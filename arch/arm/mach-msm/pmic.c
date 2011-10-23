@@ -172,7 +172,7 @@ static int pmic_rpc(int proc, void *msg, int msglen, void *rep, int replen)
 #ifdef CONFIG_ARCH_MSM7X30 /* TODO.606 need audio team help to review */
 #if (CONFIG_MSM_AMSS_VERSION >= 1200)
 	if (!pmic_ept) {
-		pmic_ept = msm_rpc_connect(PMIC_RPC_PROG, PMIC_RPC_VER_3_1, 0);
+		pmic_ept = msm_rpc_connect_compatible(PMIC_RPC_PROG, PMIC_RPC_VER_3_1, 0);
 #endif
 		if (!pmic_ept) {
 			pmic_ept = msm_rpc_connect(PMIC_RPC_PROG, PMIC_RPC_VER_2_1, 0);
@@ -205,6 +205,8 @@ static int pmic_rpc(int proc, void *msg, int msglen, void *rep, int replen)
 		}
 		r -= sizeof(struct rpc_reply_hdr);
 	}
+	else
+		pr_err("%s: msm_rpc_call_reply fail (%d)\n", __func__, r);
 done:
 	mutex_unlock(&pmic_mutex);
 	return r;

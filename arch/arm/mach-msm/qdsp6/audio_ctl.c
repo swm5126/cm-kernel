@@ -133,6 +133,11 @@ static int q6_ioctl(struct inode *inode, struct file *file,
 		if (!rc)
 			rc = q6audio_do_routing(id[0], id[1]);
 		break;
+	case AUDIO_NOTIFY_BT_ENABLE:
+		rc = copy_from_user(&n, (void *)arg, sizeof(n));
+		if (!rc)
+			rc = q6audio_set_bt_enable(n);
+		break;
 	case AUDIO_SET_VOLUME:
 		rc = copy_from_user(&n, (void *)arg, sizeof(n));
 		if (!rc)

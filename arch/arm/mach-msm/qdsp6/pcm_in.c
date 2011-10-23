@@ -132,6 +132,7 @@ static int q6_in_open(struct inode *inode, struct file *file)
 		rc = -EBUSY;
 	} else {
 		pcm_in_opened = 1;
+		file->private_data = NULL;
 		rc = 0;
 	}
 	mutex_unlock(&pcm_in_lock);

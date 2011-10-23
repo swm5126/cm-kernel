@@ -23,16 +23,33 @@
 #include <linux/types.h>
 #include <linux/rtc.h>
 #include <linux/msm_rpcrouter.h>
+#include <linux/slab.h>
 
 #include <mach/msm_rpcrouter.h>
-#include <mach/msm_rpc_version.h>
 
 #define RTC_DEBUG 0
 
 extern void msm_pm_set_max_sleep_time(int64_t sleep_time_ns);
 
+static const char *rpc_versions[] = {
+#if !defined(CONFIG_MSM_LEGACY_7X00A_AMSS)
+#if (CONFIG_MSM_AMSS_VERSION == 4735)
+	"rs30000048:00010004",
+#else
+	"rs30000048:00040000",
+	"rs30000048:00010000",
+#endif
+#else
+	"rs30000048:0da5b528",
+#endif
+};
+
 #define TIMEREMOTE_PROCEEDURE_SET_JULIAN	6
 #define TIMEREMOTE_PROCEEDURE_GET_JULIAN	7
+
+#ifdef CONFIG_BUILD_CIQ
+#define TIMEREMOTE_PROCEEDURE_GET_MILLISECOND_TICK	100
+#endif
 
 struct rpc_time_julian {
 	uint32_t year;
@@ -90,6 +107,8 @@ msmrtc_timeremote_set_time(struct device *dev, struct rtc_time *tm)
 				&req, sizeof(req),
 				&rep, sizeof(rep),
 				5 * HZ);
+	if (rc < 0)
+		pr_err("%s: msm_rpc_call_reply fail (%d)\n", __func__, rc);
 	return rc;
 }
 
@@ -115,8 +134,10 @@ msmrtc_timeremote_read_time(struct device *dev, struct rtc_time *tm)
 				&req, sizeof(req),
 				&rep, sizeof(rep),
 				5 * HZ);
-	if (rc < 0)
+	if (rc < 0) {
+		pr_err("%s: msm_rpc_call_reply fail (%d)\n", __func__, rc);
 		return rc;
+	}
 
 	if (!be32_to_cpu(rep.opt_arg)) {
 		printk(KERN_ERR "%s: No data from RTC\n", __func__);
@@ -170,10 +191,53 @@ msmrtc_virtual_alarm_set(struct device *dev, struct rtc_wkalrm *a)
 	return 0;
 }
 
+#ifdef CONFIG_BUILD_CIQ
+static int
+msmrtc_timeremote_read_ticks(struct device *dev, struct timespec *ticks)
+{
+	int rc;
+	int64_t get_ticks;
+
+	struct timeremote_get_xtal_ticks_req {
+		struct rpc_request_hdr hdr;
+		uint32_t julian_time_not_null;
+	} req;
+
+	struct timeremote_get_xtal_ticks_rep {
+		struct rpc_reply_hdr hdr;
+		uint32_t sync_ticks;
+	} rep;
+
+	req.julian_time_not_null = cpu_to_be32(1);
+
+	rc = msm_rpc_call_reply(ep, TIMEREMOTE_PROCEEDURE_GET_MILLISECOND_TICK,
+				&req, sizeof(req),
+				&rep, sizeof(rep),
+				5 * HZ);
+	if (rc < 0) {
+		pr_err("%s: msm_rpc_call_reply fail (%d)\n", __func__, rc);
+		return rc;
+	}
+
+	get_ticks = be32_to_cpu(rep.sync_ticks);
+	*ticks = ns_to_timespec(get_ticks*NSEC_PER_MSEC);
+
+#if RTC_DEBUG
+	printk(KERN_DEBUG "%s ticks to ns: %lld\n",
+			__func__, timespec_to_ns(ticks));
+#endif
+
+	return 0;
+}
+#endif
+
 static struct rtc_class_ops msm_rtc_ops = {
 	.read_time	= msmrtc_timeremote_read_time,
 	.set_time	= msmrtc_timeremote_set_time,
 	.set_alarm	= msmrtc_virtual_alarm_set,
+#ifdef CONFIG_BUILD_CIQ
+	.read_ticks	= msmrtc_timeremote_read_ticks,
+#endif
 };
 
 static void
@@ -192,6 +256,9 @@ msmrtc_probe(struct platform_device *pdev)
 {
 	struct rpcsvr_platform_device *rdev =
 		container_of(pdev, struct rpcsvr_platform_device, base);
+
+	if (rtc)
+		return -EBUSY;
 
 	ep = msm_rpc_connect(rdev->prog, rdev->vers, 0);
 	if (IS_ERR(ep)) {
@@ -252,20 +319,39 @@ msmrtc_resume(struct platform_device *dev)
 	return 0;
 }
 
-static struct platform_driver msmrtc_driver = {
-	.probe		= msmrtc_probe,
-	.suspend	= msmrtc_suspend,
-	.resume		= msmrtc_resume,
-	.driver	= {
-		.name	= APP_TIMEREMOTE_PDEV_NAME,
-		.owner	= THIS_MODULE,
-	},
-};
-
 static int __init msmrtc_init(void)
 {
+	int i;
+	int ret;
+	struct platform_driver *pdrv[ARRAY_SIZE(rpc_versions)];
+
 	rtcalarm_time = 0;
-	return platform_driver_register(&msmrtc_driver);
+
+	/* register the devices for all the major versions we support, only
+	 * one should match */
+	for (i = 0; i < ARRAY_SIZE(rpc_versions); i++) {
+		pdrv[i] = kzalloc(sizeof(struct platform_driver), GFP_KERNEL);
+		if (!pdrv[i]) {
+			ret = -ENOMEM;
+			goto err;
+		}
+		pdrv[i]->probe = msmrtc_probe;
+		pdrv[i]->suspend = msmrtc_suspend;
+		pdrv[i]->resume = msmrtc_resume;
+		pdrv[i]->driver.name = rpc_versions[i];
+		pdrv[i]->driver.owner = THIS_MODULE;
+		ret = platform_driver_register(pdrv[i]);
+		if (ret) {
+			kfree(pdrv[i]);
+			goto err;
+		}
+	}
+	return 0;
+
+err:
+	for (--i; i >= 0; i--)
+		platform_driver_unregister(pdrv[i]);
+	return ret;
 }
 
 module_init(msmrtc_init);

@@ -9,6 +9,8 @@
 #define __MTD_TRANS_H__
 
 #include <linux/mutex.h>
+#include <linux/kref.h>
+#include <linux/sysfs.h>
 
 struct hd_geometry;
 struct mtd_info;
@@ -24,6 +26,14 @@ struct mtd_blktrans_dev {
 	int devnum;
 	unsigned long size;
 	int readonly;
+	int open;
+	struct kref ref;
+	struct gendisk *disk;
+	struct attribute_group *disk_attributes;
+	struct task_struct *thread;
+	struct request_queue *rq;
+	spinlock_t queue_lock;
+	void *priv;
 	void *blkcore_priv; /* gendisk in 2.5, devfs_handle in 2.4 */
 };
 

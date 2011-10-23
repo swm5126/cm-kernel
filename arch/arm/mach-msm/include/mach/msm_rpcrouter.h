@@ -15,6 +15,12 @@
  *
  */
 
+#if defined(CONFIG_ARCH_MSM7X30_LTE)
+#include <mach/7x30-lte/msm_rpcrouter.h>
+#elif defined(CONFIG_ARCH_MSM8X60)
+#include <mach/msm_rpcrouter-8x60.h>
+#endif
+
 #ifndef __ASM__ARCH_MSM_RPCROUTER_H
 #define __ASM__ARCH_MSM_RPCROUTER_H
 
@@ -120,6 +126,10 @@ struct rpc_reply_hdr
 	} data;
 };
 
+struct rpc_board_dev {
+	uint32_t prog;
+	struct platform_device pdev;
+};
 /* flags for msm_rpc_connect() */
 #define MSM_RPC_UNINTERRUPTIBLE 0x0001
 #define MSM_RPC_ENABLE_RECEIVE (0x10000)
@@ -132,6 +142,8 @@ uint32_t msm_rpc_get_vers(struct msm_rpc_endpoint *ept);
 /* check if server version can handle client requested version */
 int msm_rpc_is_compatible_version(uint32_t server_version,
 				  uint32_t client_version);
+struct msm_rpc_endpoint *msm_rpc_connect_compatible(uint32_t prog,
+			uint32_t vers, unsigned flags);
 
 int msm_rpc_close(struct msm_rpc_endpoint *ept);
 int msm_rpc_write(struct msm_rpc_endpoint *ept,
@@ -144,6 +156,8 @@ int msm_rpc_register_server(struct msm_rpc_endpoint *ept,
 			    uint32_t prog, uint32_t vers);
 int msm_rpc_unregister_server(struct msm_rpc_endpoint *ept,
 			      uint32_t prog, uint32_t vers);
+
+int msm_rpc_add_board_dev(struct rpc_board_dev *board_dev, int num);
 
 /* simple blocking rpc call
  *
@@ -164,7 +178,7 @@ struct msm_rpc_xdr {
 	void *in_buf;
 	uint32_t in_size;
 	uint32_t in_index;
-	struct mutex in_lock;
+	wait_queue_head_t in_buf_wait_q;
 
 	void *out_buf;
 	uint32_t out_size;
@@ -174,6 +188,22 @@ struct msm_rpc_xdr {
 	struct msm_rpc_endpoint *ept;
 };
 
+int xdr_send_int8(struct msm_rpc_xdr *xdr, const int8_t *value);
+int xdr_send_uint8(struct msm_rpc_xdr *xdr, const uint8_t *value);
+int xdr_send_int16(struct msm_rpc_xdr *xdr, const int16_t *value);
+int xdr_send_uint16(struct msm_rpc_xdr *xdr, const uint16_t *value);
+int xdr_send_int32(struct msm_rpc_xdr *xdr, const int32_t *value);
+int xdr_send_uint32(struct msm_rpc_xdr *xdr, const uint32_t *value);
+int xdr_send_bytes(struct msm_rpc_xdr *xdr, const void **data, uint32_t *size);
+
+int xdr_recv_int8(struct msm_rpc_xdr *xdr, int8_t *value);
+int xdr_recv_uint8(struct msm_rpc_xdr *xdr, uint8_t *value);
+int xdr_recv_int16(struct msm_rpc_xdr *xdr, int16_t *value);
+int xdr_recv_uint16(struct msm_rpc_xdr *xdr, uint16_t *value);
+int xdr_recv_int32(struct msm_rpc_xdr *xdr, int32_t *value);
+int xdr_recv_uint32(struct msm_rpc_xdr *xdr, uint32_t *value);
+int xdr_recv_bytes(struct msm_rpc_xdr *xdr, void **data, uint32_t *size);
+
 struct msm_rpc_server
 {
 	struct list_head list;
@@ -182,7 +212,7 @@ struct msm_rpc_server
 	uint32_t prog;
 	uint32_t vers;
 
-#ifdef CONFIG_ARCH_MSM7X30
+#if defined(CONFIG_ARCH_MSM7X30) || defined(CONFIG_PROC_COMM_7X30)
 	struct mutex cb_req_lock;
 	struct msm_rpc_endpoint *cb_ept;
 	struct msm_rpc_xdr cb_xdr;
@@ -192,7 +222,7 @@ struct msm_rpc_server
 	int (*rpc_call)(struct msm_rpc_server *server,
 			struct rpc_request_hdr *req, unsigned len);
 
-#ifdef CONFIG_ARCH_MSM7X30
+#if defined(CONFIG_ARCH_MSM7X30) || defined(CONFIG_PROC_COMM_7X30)
 	int (*rpc_call2)(struct msm_rpc_server *server,
 			 struct rpc_request_hdr *req,
 			 struct msm_rpc_xdr *xdr);

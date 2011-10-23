@@ -17,6 +17,8 @@
 #include <linux/pagemap.h>
 #include <linux/splice.h>
 #include "read_write.h"
+#include <linux/writeback.h>
+#include <linux/mount.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -96,6 +98,23 @@ loff_t generic_file_llseek(struct file *file, loff_t offset, int origin)
 	return rval;
 }
 EXPORT_SYMBOL(generic_file_llseek);
+
+/**
+ * noop_llseek - No Operation Performed llseek implementation
+ * @file:	file structure to seek on
+ * @offset:	file offset to seek to
+ * @origin:	type of seek
+ *
+ * This is an implementation of ->llseek useable for the rare special case when
+ * userspace expects the seek to succeed but the (device) file is actually not
+ * able to perform the seek. In this case you use noop_llseek() instead of
+ * falling back to the default implementation of ->llseek.
+ */
+loff_t noop_llseek(struct file *file, loff_t offset, int origin)
+{
+	return file->f_pos;
+}
+EXPORT_SYMBOL(noop_llseek);
 
 loff_t no_llseek(struct file *file, loff_t offset, int origin)
 {
@@ -258,6 +277,7 @@ ssize_t do_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
 	init_sync_kiocb(&kiocb, filp);
 	kiocb.ki_pos = *ppos;
 	kiocb.ki_left = len;
+	kiocb.ki_nbytes = len;
 
 	for (;;) {
 		ret = filp->f_op->aio_read(&kiocb, &iov, 1, kiocb.ki_pos);
@@ -313,6 +333,7 @@ ssize_t do_sync_write(struct file *filp, const char __user *buf, size_t len, lof
 	init_sync_kiocb(&kiocb, filp);
 	kiocb.ki_pos = *ppos;
 	kiocb.ki_left = len;
+	kiocb.ki_nbytes = len;
 
 	for (;;) {
 		ret = filp->f_op->aio_write(&kiocb, &iov, 1, kiocb.ki_pos);
@@ -332,6 +353,8 @@ EXPORT_SYMBOL(do_sync_write);
 ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
+
+	handle_dirty_ctrl_dev(file->f_path.mnt->mnt_devname);
 
 	if (!(file->f_mode & FMODE_WRITE))
 		return -EBADF;
@@ -826,8 +849,6 @@ static ssize_t do_sendfile(int out_fd, int in_fd, loff_t *ppos,
 	if (!(out_file->f_mode & FMODE_WRITE))
 		goto fput_out;
 	retval = -EINVAL;
-	if (!out_file->f_op || !out_file->f_op->sendpage)
-		goto fput_out;
 	in_inode = in_file->f_path.dentry->d_inode;
 	out_inode = out_file->f_path.dentry->d_inode;
 	retval = rw_verify_area(WRITE, out_file, &out_file->f_pos, count);

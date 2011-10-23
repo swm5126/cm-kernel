@@ -1,6 +1,7 @@
 /* arch/arm/mach-msm/include/mach/board.h
  *
  * Copyright (C) 2007 Google, Inc.
+ * Copyright (c) 2008-2010, Code Aurora Forum. All rights reserved.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -19,6 +20,49 @@
 
 #include <linux/types.h>
 #include <asm/setup.h>
+#include <linux/input.h>
+#include <linux/usb.h>
+#include <linux/leds-pmic8058.h>
+#ifdef CONFIG_MSM_BUS_SCALING
+#include <mach/msm_bus.h>
+#endif
+#ifdef CONFIG_ARCH_MSM8X60
+#include <asm/clkdev.h>
+#endif
+#include "msm_ssbi.h"
+
+#define BIT0                    0x00000001
+#define BIT1                    0x00000002
+#define BIT2                    0x00000004
+#define BIT3                    0x00000008
+#define BIT4                    0x00000010
+#define BIT5                    0x00000020
+#define BIT6                    0x00000040
+#define BIT7                    0x00000080
+#define BIT8                    0x00000100
+#define BIT9                    0x00000200
+#define BIT10                   0x00000400
+#define BIT11                   0x00000800
+#define BIT12                   0x00001000
+#define BIT13                   0x00002000
+#define BIT14                   0x00004000
+#define BIT15                   0x00008000
+#define BIT16                   0x00010000
+#define BIT17                   0x00020000
+#define BIT18                   0x00040000
+#define BIT19                   0x00080000
+#define BIT20                   0x00100000
+#define BIT21                   0x00200000
+#define BIT22                   0x00400000
+#define BIT23                   0x00800000
+#define BIT24                   0x01000000
+#define BIT25                   0x02000000
+#define BIT26                   0x04000000
+#define BIT27                   0x08000000
+#define BIT28                   0x10000000
+#define BIT29                   0x20000000
+#define BIT30                   0x40000000
+#define BIT31                   0x80000000
 
 /* platform device data structures */
 struct msm_acpu_clock_platform_data {
@@ -28,6 +72,9 @@ struct msm_acpu_clock_platform_data {
 	unsigned long mpll_khz;
 	unsigned long power_collapse_khz;
 	unsigned long wait_for_irq_khz;
+	unsigned int max_axi_khz;
+	unsigned int max_vdd;
+	int (*acpu_set_vdd) (int mvolts);
 };
 
 struct msm_camera_io_ext {
@@ -42,10 +89,16 @@ struct msm_camera_io_ext {
 	uint32_t csiirq;
 };
 
+struct msm_camera_io_clk {
+	uint32_t mclk_clk_rate;
+	uint32_t vfe_clk_rate;
+};
+
 struct msm_camera_device_platform_data {
 	void (*camera_gpio_on) (void);
 	void (*camera_gpio_off)(void);
 	struct msm_camera_io_ext ioext;
+	struct msm_camera_io_clk ioclk;
 };
 enum msm_camera_csi_data_format {
 	CSI_8BIT,
@@ -58,7 +111,21 @@ struct msm_camera_csi_params {
 	uint8_t lane_assign;
 	uint8_t settle_cnt;
 	uint8_t dpcm_scheme;
+	uint8_t mipi_driving_strength;/*from 0-3*/
+	uint8_t hs_impedence;
 };
+
+#if defined(CONFIG_CRYPTO_DEV_QCRYPTO) || \
+	defined(CONFIG_CRYPTO_DEV_QCRYPTO_MODULE) || \
+	defined(CONFIG_CRYPTO_DEV_QCEDEV) || \
+	defined(CONFIG_CRYPTO_DEV_QCEDEV_MODULE)
+
+struct msm_ce_hw_support {
+	uint32_t ce_shared;
+	uint32_t shared_ce_resource;
+	uint32_t hw_key_support;
+};
+#endif
 
 struct msm_camera_legacy_device_platform_data {
 	int sensor_reset;
@@ -69,33 +136,19 @@ struct msm_camera_legacy_device_platform_data {
 	struct msm_camsensor_device_platform_data *sensor_info;
 };
 
-struct msm_i2c_platform_data {
-	int clk_freq;
-#ifdef CONFIG_ARCH_MSM7X30 /* TODO.606 need camera team help to check */
-	uint32_t rmutex;
-	const char *rsl_id;
-#else
-	uint32_t *rmutex;
-	int rsl_id;
-#endif
-	uint32_t pm_lat;
-	int pri_clk;
-	int pri_dat;
-	int aux_clk;
-	int aux_dat;
-	const char *clk;
-	const char *pclk;
-	void (*msm_i2c_config_gpio)(int iface, int config_type);
-};
-
 #define MSM_CAMERA_FLASH_NONE 0
 #define MSM_CAMERA_FLASH_LED  1
 #define MSM_CAMERA_FLASH_SRC_PMIC (0x00000001<<0)
 #define MSM_CAMERA_FLASH_SRC_PWM  (0x00000001<<1)
+#define MSM_CAMERA_FLASH_SRC_CURRENT_DRIVER	(0x00000001<<2)
 
 struct msm_camera_sensor_flash_pmic {
+	uint8_t num_of_src;
 	uint32_t low_current;
 	uint32_t high_current;
+	enum pmic8058_leds led_src_1;
+	enum pmic8058_leds led_src_2;
+	int (*pmic_set_current)(enum pmic8058_leds id, unsigned mA);
 };
 
 struct msm_camera_sensor_flash_pwm {
@@ -106,13 +159,27 @@ struct msm_camera_sensor_flash_pwm {
 	uint32_t channel;
 };
 
+struct pmic8058_leds_platform_data;
+struct msm_camera_sensor_flash_current_driver {
+	uint32_t low_current;
+	uint32_t high_current;
+	const struct pmic8058_leds_platform_data *driver_channel;
+};
+
 struct msm_camera_sensor_flash_src {
 	int flash_sr_type;
-
+	int (*camera_flash)(int level);
 	union {
 		struct msm_camera_sensor_flash_pmic pmic_src;
 		struct msm_camera_sensor_flash_pwm pwm_src;
+		struct msm_camera_sensor_flash_current_driver
+			current_driver_src;
 	} _fsrc;
+};
+
+enum msm_camera_source{
+	MAIN_SOURCE,
+	SECOND_SOURCE,
 };
 
 struct msm_camera_sensor_flash_data {
@@ -128,12 +195,36 @@ struct camera_flash_cfg {
 	uint8_t postpone_led_mode;
 };
 
+struct msm_camera_sensor_strobe_flash_data {
+	int flash_charge; /* pin for charge */
+	uint32_t flash_recharge_duration;
+	uint32_t irq;
+	spinlock_t spin_lock;
+	spinlock_t timer_lock;
+	int state;
+	int flash_trigger;
+	int flash_charge_done;
+};
+
+enum msm_camera_platform{
+	MSM_CAMERA_PLTFORM_8X60	= 0,
+	MSM_CAMERA_PLTFORM_7X30	= 1,
+	MSM_CAMERA_PLTFORM_MAX	= 2,
+};
+
 struct msm_camera_sensor_info {
 	const char *sensor_name;
 	int sensor_reset;
 	int sensor_pwd;
 	int vcm_pwd;
+	int vcm_enable;
+	int sp3d_gate;
+	int sp3d_sys_reset;
+	int sp3d_core_gate;
+	int sp3d_pdx;
+	uint8_t stereo_low_cap_limit;
 	void(*camera_clk_switch)(void);
+	int(*camera_pm8058_power)(int); /* for express */
 	/*power*/
 	char *camera_analog_pwd;
 	char *camera_io_pwd;
@@ -142,8 +233,12 @@ struct msm_camera_sensor_info {
 	int analog_pwd1_gpio;
 	int (*camera_power_on)(void);
 	int (*camera_power_off)(void);
+	void(*camera_set_source)(enum msm_camera_source);
+	enum msm_camera_source(*camera_get_source)(void);
+	int (*camera_main_get_probe)(void);
+	void (*camera_main_set_probe)(int);
 	int mclk;
-	int flash_type; /* for back support */
+	int flash_type;
 	uint8_t led_high_enabled;
 	int need_suspend;
 	struct msm_camera_device_platform_data *pdata;
@@ -154,9 +249,24 @@ struct msm_camera_sensor_info {
 	uint32_t kpi_sensor_start;
 	uint32_t kpi_sensor_end;
 	struct camera_flash_cfg* flash_cfg;
+	struct msm_camera_sensor_flash_data *flash_data;
 	int csi_if;
 	struct msm_camera_csi_params csi_params;
+	struct msm_camera_sensor_strobe_flash_data *strobe_flash_data;
+	int sensor_lc_disable; /* for sensor lens correction support */
+	uint8_t (*preview_skip_frame)(void);
+	int power_down_disable; /* if close power */
+	int full_size_preview; /* if use full-size preview */
+	int cam_select_pin; /* for two sensors */
+	int mirror_mode; /* for sensor upside down */
+	int zero_shutter_mode; /* for doing zero shutter lag on MIPI */
+	int gpio_set_value_force; /*true: force to set gpio  */
+	int dev_node;
+	char *eeprom_data;	/* qs_s5k4e1 */
+	int camera_platform;
 };
+
+
 struct clk;
 
 struct snd_endpoint {
@@ -229,12 +339,125 @@ struct msm_adspdec_database {
 	struct dec_instance_table *dec_instance_list;
 };
 
+struct msm_panel_common_pdata {
+	uintptr_t hw_revision_addr;
+	int gpio;
+	int (*backlight_level)(int level, int max, int min);
+	int (*pmic_backlight)(int level);
+	int (*panel_num)(void);
+	void (*panel_config_gpio)(int);
+	int (*vga_switch)(int select_vga);
+	int *gpio_num;
+	int mdp_core_clk_rate;
+	unsigned num_mdp_clk;
+	int *mdp_core_clk_table;
+	int (*rgb_format)(void);
+	unsigned char (*shrink_pwm)(int val);
+#ifdef CONFIG_MSM_BUS_SCALING
+	struct msm_bus_scale_pdata *mdp_bus_scale_table;
+#endif
+	int (*mdp_color_enhance)(void);
+	int (*mdp_gamma)(void);
+	void (*mdp_img_stick_wa)(bool );
+	unsigned long update_interval;
+	atomic_t img_stick_on;
+	struct panel_dcr_info *dcr_panel_pinfo;
+	unsigned int auto_bkl_stat;
+	int (*bkl_enable)(int);
+};
+
+struct lcdc_platform_data {
+	int (*lcdc_gpio_config)(int on);
+	int (*lcdc_power_save)(int);
+	unsigned int (*lcdc_get_clk)(void);
+#ifdef CONFIG_MSM_BUS_SCALING
+	struct msm_bus_scale_pdata *bus_scale_table;
+#endif
+};
+
+struct tvenc_platform_data {
+	int poll;
+	int (*pm_vid_en)(int on);
+#ifdef CONFIG_MSM_BUS_SCALING
+	struct msm_bus_scale_pdata *bus_scale_table;
+#endif
+};
+
+struct mddi_platform_data {
+	int (*mddi_power_save)(int on);
+	int (*mddi_sel_clk)(u32 *clk_rate);
+	int (*mddi_client_power)(u32 client_id);
+};
+
+struct mipi_dsi_platform_data {
+	int vsync_gpio;
+	int (*dsi_power_save)(int on);
+	int (*esd_fixup)(uint32_t mfd_data);
+};
+
+struct msm_fb_platform_data {
+	int (*detect_client)(const char *name);
+	int mddi_prescan;
+	int (*allow_set_offset)(void);
+	int blt_mode;
+	uint32_t width;
+	uint32_t height;
+};
+
+struct msm_hdmi_platform_data {
+	int irq;
+	int (*cable_detect)(int insert);
+	int (*comm_power)(int on, int show);
+	int (*enable_5v)(int on);
+	int (*core_power)(int on, int show);
+	int (*cec_power)(int on);
+	int (*init_irq)(void);
+};
+
+struct msm_i2c_platform_data {
+	int clk_freq;
+#if defined(CONFIG_ARCH_MSM7X30) || defined(CONFIG_ARCH_MSM8X60)/* TODO.606 need camera team help to check */
+	uint32_t rmutex;
+	const char *rsl_id;
+#else
+	uint32_t *rmutex;
+	int rsl_id;
+#endif
+	uint32_t pm_lat;
+	int pri_clk;
+	int pri_dat;
+	int aux_clk;
+	int aux_dat;
+	const char *clk;
+	const char *pclk;
+	int src_clk_rate;
+	int use_gsbi_shared_mode;
+	void (*msm_i2c_config_gpio)(int iface, int config_type);
+};
+
 /* common init routines for use by arch/arm/mach-msm/board-*.c */
 void __init msm_add_devices(void);
 void __init msm_map_common_io(void);
+void __init msm_map_qsd8x50_io(void);
+void __init msm_map_msm8x60_io(void);
+void __init msm_map_msm7x30_io(void);
+void __init msm_map_comet_io(void);
 void __init msm_init_irq(void);
+
+#ifdef CONFIG_ARCH_MSM8X60
+void __init msm_clock_init(struct clk_lookup *clock_tbl, unsigned num_clocks);
+struct mmc_platform_data;
+int __init msm_add_sdcc(unsigned int controller,
+		struct mmc_platform_data *plat);
+#else
 void __init msm_clock_init(void);
+#endif
+
 void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *);
+
+struct msm_usb_host_platform_data;
+int __init msm_add_host(unsigned int host,
+		struct msm_usb_host_platform_data *plat);
 
 #if defined(CONFIG_MSM_RMT_STORAGE_SERVER)
 struct shared_ramfs_entry {
@@ -255,15 +478,81 @@ int __init rmt_storage_add_ramfs(void);
 #endif
 
 #if defined(CONFIG_USB_FUNCTION_MSM_HSUSB) || defined(CONFIG_USB_MSM_72K)
+#define SHIP_BUILD	0
+#define MFG_BUILD	1
+#define ENG_BUILD	2
+
 void msm_hsusb_set_vbus_state(int online);
+enum usb_connect_type {
+	CONNECT_TYPE_CLEAR = -2,
+	CONNECT_TYPE_UNKNOWN = -1,
+	CONNECT_TYPE_NONE = 0,
+	CONNECT_TYPE_USB,
+	CONNECT_TYPE_AC,
+	CONNECT_TYPE_9V_AC,
+	CONNECT_TYPE_WIRELESS,
+	CONNECT_TYPE_INTERNAL,
+	CONNECT_TYPE_UNSUPPORTED,
+#ifdef CONFIG_MACH_VERDI_LTE
+	/* Y cable with USB and 9V charger */
+	CONNECT_TYPE_USB_9V_AC,
+#endif
+};
+
 /* START: add USB connected notify function */
 struct t_usb_status_notifier{
 	struct list_head notifier_link;
 	const char *name;
-	void (*func)(int online);
+	void (*func)(int cable_type);
 };
-	int usb_register_notifier(struct t_usb_status_notifier *);
-	static LIST_HEAD(g_lh_usb_notifier_list);
+int usb_register_notifier(struct t_usb_status_notifier *);
+static LIST_HEAD(g_lh_usb_notifier_list);
+
+/***********************************
+Direction: cable detect drvier -> battery driver or other
+***********************************/
+struct t_cable_status_notifier{
+	struct list_head cable_notifier_link;
+	const char *name;
+	void (*func)(int cable_type);
+};
+int cable_detect_register_notifier(struct t_cable_status_notifier *);
+static LIST_HEAD(g_lh_calbe_detect_notifier_list);
+
+/***********************************
+Direction: 1-wire drvier -> battery driver or other
+***********************************/
+struct t_owe_charging_notifier{
+	struct list_head owe_charging_notifier_link;
+	const char *name;
+	void (*func)(int charging_type);
+};
+int owe_charging_register_notifier(struct t_owe_charging_notifier *);
+static LIST_HEAD(g_lh_owe_charging_notifier_list);
+
+/***********************************
+ Direction: sii9234 drvier -> cable detect driver
+***********************************/
+struct t_mhl_status_notifier{
+	struct list_head mhl_notifier_link;
+	const char *name;
+	void (*func)(bool isMHL, int charging_type);
+};
+int mhl_detect_register_notifier(struct t_mhl_status_notifier *);
+static LIST_HEAD(g_lh_mhl_detect_notifier_list);
+
+#if (defined(CONFIG_USB_OTG) && defined(CONFIG_USB_OTG_HOST))
+/***********************************
+Direction: cable detect drvier -> usb driver
+ ***********************************/
+struct t_usb_host_status_notifier{
+	struct list_head usb_host_notifier_link;
+	const char *name;
+	void (*func)(bool cable_in);
+};
+int usb_host_detect_register_notifier(struct t_usb_host_status_notifier *);
+static LIST_HEAD(g_lh_usb_host_detect_notifier_list);
+#endif
 /* END: add USB connected notify function */
 #else
 static inline void msm_hsusb_set_vbus_state(int online) {}
@@ -271,14 +560,24 @@ static inline void msm_hsusb_set_vbus_state(int online) {}
 
 int __init parse_tag_skuid(const struct tag *tags);
 int __init parse_tag_engineerid(const struct tag *tags);
+int __init parse_tag_memsize(const struct tag *tags);
+int __init parse_tag_extdiag(const struct tag * tags);
+int __init parse_tag_cam(const struct tag *tag);
+int board_build_flag(void);
+
 int board_mfg_mode(void);
 void __init msm_snddev_init(void);
+void __init msm_snddev_init_timpani(void);
 void msm_snddev_poweramp_on(void);
 void msm_snddev_poweramp_off(void);
 void msm_snddev_hsed_pamp_on(void);
 void msm_snddev_hsed_pamp_off(void);
 void msm_snddev_tx_route_config(void);
 void msm_snddev_tx_route_deconfig(void);
+void msm_snddev_rx_route_config(void);
+void msm_snddev_rx_route_deconfig(void);
+
+extern unsigned int msm_shared_ram_phys; /* defined in arch/arm/mach-msm/io.c */
 
 extern int emmc_partition_read_proc(char *page, char **start, off_t off,
 			   int count, int *eof, void *data);

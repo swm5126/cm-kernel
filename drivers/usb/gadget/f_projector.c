@@ -28,7 +28,7 @@
 #include <linux/input.h>
 
 #include <linux/usb/android_composite.h>
-
+#include <linux/wakelock.h>
 #ifdef DBG
 #undef DBG
 #endif
@@ -45,11 +45,12 @@
 
 /* number of rx and tx requests to allocate */
 #define RX_REQ_MAX 4
-#define TX_REQ_MAX 56 /*for 8k resolution 480*800*2 / 16k */
+#define TX_REQ_MAX 75 /*for resolution 1024*600*2 / 16k */
 
 #define BITSPIXEL 16
 #define PROJECTOR_FUNCTION_NAME "projector"
 
+static struct wake_lock prj_idle_wake_lock;
 static int keypad_code[] = {KEY_WAKEUP, 0, 0, 0, KEY_HOME, KEY_MENU, KEY_BACK};
 static const char shortname[] = "android_projector";
 
@@ -342,7 +343,7 @@ static void send_fb(struct projector_dev *ctxt)
 			count -= xfer;
 			frame += xfer;
 		} else {
-			DBG("send_fb: no req to send\n");
+			printk(KERN_ERR "send_fb: no req to send\n");
 			break;
 		}
 	}
@@ -385,10 +386,9 @@ static void projector_get_msmfb(struct projector_dev *ctxt)
 	ctxt->width = fb_info.xres;
 	ctxt->height = fb_info.yres;
 	ctxt->fbaddr = fb_info.fb_addr;
-	printk(KERN_INFO "projector: width %d, height %d\n",
-		   fb_info.xres, fb_info.yres);
-
 	ctxt->framesize = (ctxt->width)*(ctxt->height)*2;
+	printk(KERN_INFO "projector: width %d, height %d %d\n",
+		   fb_info.xres, fb_info.yres, ctxt->framesize);
 }
 
 static void projector_complete_in(struct usb_ep *ep, struct usb_request *req)
@@ -448,6 +448,7 @@ static void projector_complete_out(struct usb_ep *ep, struct usb_request *req)
 
 	req_put(ctxt, &ctxt->rx_idle, req);
 	projector_queue_out(ctxt);
+	wake_lock_timeout(&prj_idle_wake_lock, HZ / 2);
 }
 
 static int __init create_bulk_endpoints(struct projector_dev *dev,
@@ -561,6 +562,25 @@ projector_function_unbind(struct usb_configuration *c, struct usb_function *f)
 	spin_unlock_irq(&dev->lock);
 }
 
+static void
+projector_function_release(struct usb_configuration *c, struct usb_function *f)
+{
+	struct projector_dev	*dev = func_to_dev(f);
+	struct usb_request *req;
+	/* spin_lock is not allowed here because req_get also require lock */
+	/* spin_lock_irq(&dev->lock); */
+
+	while ((req = req_get(dev, &dev->tx_idle)))
+		projector_request_free(req, dev->ep_in);
+	while ((req = req_get(dev, &dev->rx_idle)))
+		projector_request_free(req, dev->ep_out);
+
+	dev->online = 0;
+	dev->error = 1;
+	/* spin_unlock_irq(&dev->lock); */
+	usb_interface_id_remove(c, 1);
+}
+
 static int projector_function_set_alt(struct usb_function *f,
 		unsigned intf, unsigned alt)
 {
@@ -610,6 +630,7 @@ static int projector_touch_init(struct projector_dev *dev)
 	int ret = 0;
 	struct input_dev *tdev = dev->touch_input;
 
+	printk(KERN_INFO "%s: x=%d y=%d\n", __func__, x, y);
 	dev->touch_input  = input_allocate_device();
 	if (dev->touch_input == NULL) {
 		printk(KERN_ERR "%s: Failed to allocate input device\n",
@@ -710,7 +731,7 @@ static ssize_t store_enable(struct device *dev, struct device_attribute *attr,
 {
 	int _enabled = simple_strtol(buf, NULL, 0);
 	printk(KERN_INFO "projector: %d\n", _enabled);
-	android_enable_function(&_projector_dev.function, _enabled, true);
+	android_enable_function(&_projector_dev.function, _enabled);
 	_projector_dev.enabled = _enabled;
 	return count;
 }
@@ -723,7 +744,7 @@ static ssize_t show_enable(struct device *dev, struct device_attribute *attr,
 	return 2;
 
 }
-static DEVICE_ATTR(enable, 0666, show_enable, store_enable);
+static DEVICE_ATTR(enable, 0664, show_enable, store_enable);
 
 static void prj_dev_release(struct device *dev) {}
 
@@ -752,8 +773,10 @@ static int projector_bind_config(struct usb_configuration *c)
 	dev->function.hs_descriptors = hs_projector_descs;
 	dev->function.bind = projector_function_bind;
 	dev->function.unbind = projector_function_unbind;
+	dev->function.release = projector_function_release;
 	dev->function.set_alt = projector_function_set_alt;
 	dev->function.disable = projector_function_disable;
+	dev->function.dynamic = 1;
 
 	/* start disabled */
 	dev->function.hidden = 1;
@@ -811,6 +834,7 @@ static int pjr_probe(struct platform_device *pdev)
 	dev->pdev = pdev;
 	dev->init_done = 0;
 	dev->frame_count = 0;
+	wake_lock_init(&prj_idle_wake_lock, WAKE_LOCK_IDLE, "prj_idle_lock");
 	return 0;
 }
 

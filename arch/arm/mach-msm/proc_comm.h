@@ -1,6 +1,6 @@
 /* arch/arm/mach-msm/proc_comm.h
  *
- * Copyright (c) 2007 QUALCOMM Incorporated
+ * Copyright (c) 2007-2009, Code Aurora Forum. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -135,8 +135,25 @@ enum {
 	PCOM_CLKCTL_RPC_RAIL_DISABLE,
 	PCOM_CLKCTL_RPC_RAIL_CONTROL,
 	PCOM_CLKCTL_RPC_MIN_MSMC1,
+#if defined(CONFIG_ARCH_MSM7X30_LTE)
+	PCOM_CLKCTL_RPC_SRC_REQUEST,
+	PCOM_NPA_INIT,
+	PCOM_NPA_ISSUE_REQUIRED_REQUEST,
+#else
 	PCOM_NUM_CMDS,
+#endif
 };
+
+#if defined(CONFIG_ARCH_MSM7X30_LTE)
+enum {
+	PCOM_OEM_FIRST_CMD = 0x10000000,
+	PCOM_OEM_TEST_CMD = PCOM_OEM_FIRST_CMD,
+
+	/* add OEM PROC COMM commands here */
+
+	PCOM_OEM_LAST = PCOM_OEM_TEST_CMD,
+};
+#endif
 
 enum {
 	PCOM_INVALID_STATUS = 0x0,
@@ -250,6 +267,7 @@ enum {
 		(((pull) & 0x3) << 15)		| \
 		(((drvstr) & 0xF) << 17))
 
+void msm_proc_comm_reset_modem_now(void);
 int msm_proc_comm(unsigned cmd, unsigned *data1, unsigned *data2);
 
 #endif

@@ -427,7 +427,32 @@ void dump_stacktrace(struct pt_regs * const regs, unsigned int depth, void *ssp)
 
 static void debug_exec(const char *cmd, unsigned *regs, void *svc_sp)
 {
-	if (!strcmp(cmd, "pc")) {
+	if (!strcmp(cmd, "all")) {
+		dprintf(" pc %08x cpsr %08x mode %s\n", /*pc*/
+			regs[15], regs[16], mode_name(regs[16]));
+		dprintf("%s\n", linux_banner); /*version*/
+		debug_puts("\n[allregs]\n");
+		dump_allregs(regs); /*allregs*/
+		debug_puts("\n[irqs]\n");
+		dump_irqs(); /*irqs*/
+		debug_puts("\n[bt 1st]\n");
+		dump_stacktrace((struct pt_regs *)regs, 100, svc_sp); /*bt 1st*/
+		debug_puts("\n[bt 2nd]\n");
+		dump_stacktrace((struct pt_regs *)regs, 100, svc_sp); /*bt 2nd*/
+		debug_puts("\n[kmsg]\n");
+		dump_kernel_log(); /*kmsg*/
+		debug_puts("\n\n");
+
+		if (debug_busy) {
+			dprintf("command processor busy. trying to abort.\n");
+			debug_abort = -1;
+		} else {
+			strcpy(debug_cmd, "all");
+			debug_busy = 1;
+		}
+		msm_trigger_irq(debug_signal_irq);
+		return;
+	} else if (!strcmp(cmd, "pc")) {
 		dprintf(" pc %08x cpsr %08x mode %s\n",
 			regs[15], regs[16], mode_name(regs[16]));
 	} else if (!strcmp(cmd, "regs")) {
@@ -676,8 +701,10 @@ static int msm_serial_debug_remove(const char *val, struct kernel_param *kp)
 	msm_fiq_set_handler(NULL, 0);
 	msm_fiq_disable(init_data.irq);
 	msm_fiq_unselect(init_data.irq);
-	if (debug_clk_enabled)
+	if (debug_clk_enabled) {
 		clk_disable(debug_clk);
+		debug_clk_enabled = 0;
+	}
 	wake_lock_destroy(&debugger_wake_lock);
 	printk(KERN_INFO "disable FIQ serial debugger\n");
 	return 0;

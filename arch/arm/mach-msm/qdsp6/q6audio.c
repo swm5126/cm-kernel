@@ -19,7 +19,7 @@
 #include <linux/wait.h>
 #include <linux/dma-mapping.h>
 #include <linux/clk.h>
-
+#include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/wakelock.h>
 #include <linux/firmware.h>
@@ -37,7 +37,8 @@
 
 #include "q6audio_devices.h"
 
-#if 0
+#define TRACE_CHECKS_Q6 0
+#if TRACE_CHECKS_Q6
 #define TRACE(x...) pr_info("Q6: "x)
 #else
 #define TRACE(x...) do{}while(0)
@@ -108,6 +109,9 @@ static int rx_vol_level = 100;
 static char acdb_file[64] = "default.acdb";
 static uint32_t tx_acdb = 0;
 static uint32_t rx_acdb = 0;
+#ifdef CONFIG_QSD_AUDIO_OBOEA
+static int bt_enable;
+#endif
 
 void q6audio_register_analog_ops(struct q6audio_analog_ops *ops)
 {
@@ -682,6 +686,7 @@ static int audio_rx_mute(struct audio_client *ac, uint32_t dev_id, int mute)
 	return audio_ioctl(ac, &rpc, sizeof(rpc));
 }
 
+#if 0
 static int audio_tx_volume(struct audio_client *ac, uint32_t dev_id, int32_t volume)
 {
 	struct adsp_set_dev_volume_command rpc;
@@ -693,6 +698,7 @@ static int audio_tx_volume(struct audio_client *ac, uint32_t dev_id, int32_t vol
 	rpc.volume = volume;
 	return audio_ioctl(ac, &rpc, sizeof(rpc));
 }
+#endif
 
 static int audio_tx_mute(struct audio_client *ac, uint32_t dev_id, int mute)
 {
@@ -734,7 +740,9 @@ static void callback(void *data, int len, void *cookie)
 {
 	struct adsp_event_hdr *e = data;
 	struct audio_client *ac;
+#if TRACE_CHECKS_Q6
 	struct adsp_buffer_event *abe = data;
+#endif
 
 	TRACE("audio callback: context %d, event 0x%x, status %d\n",
 	      e->context, e->event_id, e->status);
@@ -1022,7 +1030,9 @@ static void audio_rx_analog_enable(int en)
 	switch (audio_rx_device_id) {
 	case ADSP_AUDIO_DEVICE_ID_HEADSET_SPKR_MONO:
 	case ADSP_AUDIO_DEVICE_ID_HEADSET_SPKR_STEREO:
+#ifndef CONFIG_QSD_AUDIO_OBOEA
 	case ADSP_AUDIO_DEVICE_ID_TTY_HEADSET_SPKR:
+#endif
 		if (analog_ops->headset_enable)
 			analog_ops->headset_enable(en);
 		break;
@@ -1048,6 +1058,12 @@ static void audio_rx_analog_enable(int en)
 		if (analog_ops->receiver_enable)
 			analog_ops->receiver_enable(en);
 		break;
+#ifdef CONFIG_QSD_AUDIO_OBOEA
+	case ADSP_AUDIO_DEVICE_ID_GSM_HANDSET_SPKR:
+		if (analog_ops->receiver_enable)
+			analog_ops->receiver_enable(en);
+		break;
+#endif
 	case ADSP_AUDIO_DEVICE_ID_I2S_SPKR:
 		if (analog_ops->i2s_enable)
 			analog_ops->i2s_enable(en);
@@ -1060,11 +1076,16 @@ static void audio_tx_analog_enable(int en)
 	switch (audio_tx_device_id) {
 	case ADSP_AUDIO_DEVICE_ID_HANDSET_MIC:
 	case ADSP_AUDIO_DEVICE_ID_SPKR_PHONE_MIC:
+#ifdef CONFIG_QSD_AUDIO_OBOEA
+	case ADSP_AUDIO_DEVICE_ID_GSM_HANDSET_MIC:
+#endif
 		if (analog_ops->int_mic_enable)
 			analog_ops->int_mic_enable(en);
 		break;
 	case ADSP_AUDIO_DEVICE_ID_HEADSET_MIC:
+#ifndef CONFIG_QSD_AUDIO_OBOEA
 	case ADSP_AUDIO_DEVICE_ID_TTY_HEADSET_MIC:
+#endif
 		if (analog_ops->ext_mic_enable)
 			analog_ops->ext_mic_enable(en);
 		break;
@@ -1354,8 +1375,8 @@ static int audio_tx_path_enable(int en, uint32_t acdb_id)
 	if (en) {
 		audio_tx_path_refcount++;
 		if (audio_tx_path_refcount == 1) {
-			_audio_tx_path_enable(0, acdb_id);
 			_audio_tx_clk_enable();
+			_audio_tx_path_enable(0, acdb_id);
 		}
 	} else {
 		audio_tx_path_refcount--;
@@ -1464,6 +1485,25 @@ int q6audio_set_rx_volume(int level)
 	audio_rx_volume(ac_control, adev, vol);
 	rx_vol_level = level;
 	mutex_unlock(&audio_path_lock);
+	return 0;
+}
+
+int q6audio_set_bt_enable(int bOn)
+{
+#ifdef CONFIG_QSD_AUDIO_OBOEA
+	if (q6audio_init())
+		return 0;
+
+	mutex_lock(&audio_path_lock);
+	bt_enable = bOn;
+
+	if (bt_enable) {
+		if (analog_ops->bt_sco_enable)
+			analog_ops->bt_sco_enable(bt_enable);
+	}
+	mutex_unlock(&audio_path_lock);
+	pr_aud_info("ioctl BT enable %d\n", bt_enable);
+#endif
 	return 0;
 }
 

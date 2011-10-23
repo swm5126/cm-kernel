@@ -72,17 +72,17 @@ static int (*sonywvga_power)(int on);
 static int (*gpio_switch)(int on);
 static struct wake_lock panel_idle_lock;
 
-static int is_sony_spi()
+inline int is_sony_spi(void)
 {
 	return (panel_type & SONY_PWM_SPI ? 1 : 0);
 }
 
-static int is_sony_with_gamma()
+inline int is_sony_with_gamma(void)
 {
 	return (panel_type & SONY_GAMMA ? 1 : 0);
 }
 
-static int is_sony_RGB666()
+inline int is_sony_RGB666(void)
 {
 	return (panel_type & SONY_RGB666 ? 1 : 0);
 }
@@ -524,7 +524,7 @@ static int __init sonywvga_init_panel(void)
 	return 0;
 }
 
-static int __init sonywvga_probe(struct platform_device *pdev)
+static int sonywvga_probe(struct platform_device *pdev)
 {
 	int rc = -EIO;
 	struct panel_platform_data *pdata;
