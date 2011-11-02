@@ -634,32 +634,53 @@ static int mxt224_power(int on)
 	return 0;
 }
 
+static u8 t6_config[] = {GEN_COMMANDPROCESSOR_T6,
+				0, 0, 0, 0, 0, 0};
 static u8 t7_config[] = {GEN_POWERCONFIG_T7,
-				64, 255, 50};
+				50, 15, 25};
 static u8 t8_config[] = {GEN_ACQUISITIONCONFIG_T8,
-				7, 0, 5, 0, 0, 0, 9, 35};
+				10, 0, 20, 10, 0, 0, 5, 15};
 static u8 t9_config[] = {TOUCH_MULTITOUCHSCREEN_T9,
-				139, 0, 0, 19, 11, 0, 32, 25, 2, 1, 25, 3, 1,
-				46, 2, 5, 14, 10, 255, 3,
-				255, 3, 18, 18, 10, 10, 141, 65, 143, 110, 18};
+				139, 0, 0, 18, 12, 0, 16, 38, 3, 7, 0, 5, 2,
+				15, 2, 10, 25, 5, 0, 0,
+				0, 0, 0, 0, 0, 0, 159, 47, 149, 81, 40};
+static u8 t15_config[] = {TOUCH_KEYARRAY_T15,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 static u8 t18_config[] = {SPT_COMCONFIG_T18,
 				0, 1};
+static u8 t19_config[] = {SPT_GPIOPWM_T19,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}; 
 static u8 t20_config[] = {PROCI_GRIPFACESUPPRESSION_T20,
 				7, 0, 0, 0, 0, 0, 0, 80, 40, 4, 35, 10};
 static u8 t22_config[] = {PROCG_NOISESUPPRESSION_T22,
-				5, 0, 0, 0, 0, 0, 0, 3, 30, 0, 0, 29, 34, 39,
-				49, 58, 3};
+				15, 0, 0, 0, 0, 0, 0, 0, 16, 0, 1, 0, 7, 18,
+				25, 30, 0};
+static u8 t23_config[] = {TOUCH_PROXIMITY_T23,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static u8 t24_config[] = {PROCI_ONETOUCHGESTUREPROCESSOR_T24,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static u8 t25_config[] = {SPT_SELFTEST_T25, 
+				3, 0, 200, 50, 64, 31, 0, 0, 0, 0, 0, 0, 0, 0};
+static u8 t27_config[] = {PROCI_TWOTOUCHGESTUREPROCESSOR_T27,
+				0, 0, 0, 0, 0, 0, 0};
 static u8 t28_config[] = {SPT_CTECONFIG_T28,
-				1, 0, 3, 16, 63, 60};
+				0, 0, 2, 4, 8, 60};
 static u8 end_config[] = {RESERVED_T255};
 
 static const u8 *mxt224_config[] = {
+	t6_config,
 	t7_config,
 	t8_config,
 	t9_config,
+	t15_config,
 	t18_config,
+	t19_config,
 	t20_config,
 	t22_config,
+	t23_config,
+	t24_config,
+	t25_config,
+	t27_config,
 	t28_config,
 	end_config,
 };
@@ -685,14 +706,14 @@ static void mxt224_init(void)
 {
 	printk(KERN_INFO "mxt224: entered mxt224_init\n");
 	mxt224_data.max_y = 966;
-	t9_config[8] = 38;
-	t9_config[9] = 3;
-	t9_config[23] = 0;
-	t9_config[24] = 0;
-	t9_config[27] = 159;
-	t9_config[28] = 47;
-	t9_config[29] = 149;
-	t9_config[30] = 81;
+	//t9_config[8] = 38;
+	//t9_config[9] = 3;
+	//t9_config[23] = 0;
+	//t9_config[24] = 0;
+	//t9_config[27] = 159;
+	//t9_config[28] = 47;
+	//t9_config[29] = 149;
+	//t9_config[30] = 81;
 }
 
 static struct regulator_consumer_supply tps65023_dcdc1_supplies[] = {
@@ -1279,7 +1300,7 @@ static ssize_t incrediblec_virtual_keys_show(struct kobject *kobj,
 
 static struct kobj_attribute incrediblec_virtual_keys_attr = {
 	.attr = {
-		.name = "virtualkeys.atmel-touchscreen",
+		.name = "virtualkeys.mxt224",
 		.mode = S_IRUGO,
 	},
 	.show = &incrediblec_virtual_keys_show,
@@ -1373,12 +1394,9 @@ static void __init incrediblec_init(void)
 	if (!opt_usb_h2w_sw) {
 		msm_device_hsusb.dev.platform_data = &msm_hsusb_pdata;
 	}	
-	//if (system_rev > 2) {
-	//	incrediblec_atmel_ts_data[0].config_T9[7] = 33;
-	//	incrediblec_atmel_ts_data[0].object_crc[0] = 0x2E;
-	//	incrediblec_atmel_ts_data[0].object_crc[1] = 0x80;
-	//	incrediblec_atmel_ts_data[0].object_crc[2] = 0xE0;
-	//}
+	//if (system_rev > 2) 
+	//	incrediblec_mxt224_data[0].config_T9[7] = 33;
+
 	mxt224_init();
 	i2c_register_board_info(0, i2c_devices, ARRAY_SIZE(i2c_devices));
 
