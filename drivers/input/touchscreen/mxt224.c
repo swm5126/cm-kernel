@@ -565,10 +565,6 @@ static int __devinit mxt224_probe(struct i2c_client *client,
 	input_set_drvdata(input_dev, data);
 	input_dev->name = "mxt224_ts_input";
 
-	//set_bit(EV_SYN, input_dev->evbit);
-	//set_bit(EV_KEY, input_dev->evbit);
-	//set_bit(BTN_TOUCH, input_dev->keybit);
-	//set_bit(BTN_2, input_dev->keybit);
 	set_bit(EV_ABS, input_dev->evbit);
 
 	input_set_abs_params(input_dev, ABS_MT_POSITION_X, pdata->min_x,

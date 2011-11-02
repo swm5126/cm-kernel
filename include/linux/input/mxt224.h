@@ -88,10 +88,4 @@ struct mxt224_platform_data {
 	int (*power)(int on);
 };
 
-//struct mxt224_virtual_key {
-//	int keycode;
-//	int range_min;
-//	int range_max;
-//};
-
 #endif
