@@ -1300,7 +1300,7 @@ static ssize_t incrediblec_virtual_keys_show(struct kobject *kobj,
 
 static struct kobj_attribute incrediblec_virtual_keys_attr = {
 	.attr = {
-		.name = "virtualkeys.mxt224",
+		.name = "virtualkeys.mxt224_ts_input",
 		.mode = S_IRUGO,
 	},
 	.show = &incrediblec_virtual_keys_show,
