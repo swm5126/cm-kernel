@@ -24,6 +24,14 @@ config TOUCHSCREEN_COMPATIBLE_REPORT
 	help
 	  This enables support for old report style in touchscreen driver
 
+#config TOUCHSCREEN_CONCATENATE_REPORT
+#	bool "Touchscreen concatenate report"
+#	depends on I2C
+#	default n
+#	help
+#	  This enables support for concatenate report style in touchscreen driver
+#	  This support could reduce the number of reports in touchscreen driver
+
 config TOUCHSCREEN_88PM860X
 	tristate "Marvell 88PM860x touchscreen"
 	depends on MFD_88PM860X
