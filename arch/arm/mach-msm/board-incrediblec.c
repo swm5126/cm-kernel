@@ -59,7 +59,7 @@
 #endif
 #include <mach/tpa6130.h>
 #include <mach/msm_flashlight.h>
-#include <linux/input/mxt224.h>
+#include <linux/atmel_qt602240.h>
 #include <mach/vreg.h>
 #include <mach/msm_hsusb.h>
 #include <mach/bcm_bt_lpm.h>
@@ -617,6 +617,7 @@ static struct platform_device ram_console_device = {
 	.resource	= ram_console_resources,
 };
 
+/*
 static int mxt224_power(int on)
 {
 	printk(KERN_INFO "Atmel mxt224 interface (%d)\n", on);
@@ -716,6 +717,110 @@ static void mxt224_init(void)
 	//t9_config[30] = 81;
 }
 
+*/
+static int incrediblec_atmel_ts_power(int on)
+{
+	printk(KERN_INFO "incrediblec_atmel_ts_power(%d)\n", on);
+	if (on) {
+		gpio_set_value(INCREDIBLEC_GPIO_TP_RST, 0);
+		msleep(5);
+		gpio_set_value(INCREDIBLEC_GPIO_TP_EN, 1);
+		msleep(5);
+		gpio_set_value(INCREDIBLEC_GPIO_TP_RST, 1);
+		msleep(40);
+	} else {
+		gpio_set_value(INCREDIBLEC_GPIO_TP_EN, 0);
+		msleep(2);
+	}
+	return 0;
+}
+
+struct atmel_i2c_platform_data incrediblec_atmel_ts_data[] = {
+	{
+		.version = 0x016,
+		.abs_x_min = 1,
+		.abs_x_max = 1023,
+		.abs_y_min = 2,
+		.abs_y_max = 966,
+		.abs_pressure_min = 0,
+		.abs_pressure_max = 255,
+		.abs_width_min = 0,
+		.abs_width_max = 20,
+		.gpio_irq = INCREDIBLEC_GPIO_TP_INT_N,
+		.power = incrediblec_atmel_ts_power,
+		.config_T6 = {0, 0, 0, 0, 0, 0},
+		.config_T7 = {50, 15, 25},
+		.config_T8 = {10, 0, 20, 10, 0, 0, 5, 15},
+		.config_T9 = {139, 0, 0, 18, 12, 0, 16, 38, 3, 7, 0, 5, 2, 15, 2, 10, 25, 5, 0, 0, 0, 0, 0, 0, 0, 0, 159, 47, 149, 81, 40},
+		.config_T15 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T19 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T20 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T22 = {15, 0, 0, 0, 0, 0, 0, 0, 16, 0, 1, 0, 7, 18, 25, 30, 0},
+		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T24 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T25 = {3, 0, 200, 50, 64, 31, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T27 = {0, 0, 0, 0, 0, 0, 0},
+		.config_T28 = {0, 0, 2, 4, 8, 60},
+		.object_crc = {0xDB, 0xBF, 0x60},
+		.cable_config = {35, 30, 8, 16},
+		.GCAF_level = {20, 24, 28, 40, 63},
+		.filter_level = {15, 60, 963, 1008},
+	},
+	{
+		.version = 0x015,
+		.abs_x_min = 13,
+		.abs_x_max = 1009,
+		.abs_y_min = 15,
+		.abs_y_max = 960,
+		.abs_pressure_min = 0,
+		.abs_pressure_max = 255,
+		.abs_width_min = 0,
+		.abs_width_max = 20,
+		.gpio_irq = INCREDIBLEC_GPIO_TP_INT_N,
+		.power = incrediblec_atmel_ts_power,
+		.config_T6 = {0, 0, 0, 0, 0, 0},
+		.config_T7 = {50, 15, 25},
+		.config_T8 = {12, 0, 20, 20, 0, 0, 20, 0},
+		.config_T9 = {139, 0, 0, 18, 12, 0, 32, 40, 2, 7, 0, 5, 2, 0, 2, 10, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 159, 47, 149, 81},
+		.config_T15 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T19 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T20 = {7, 0, 0, 0, 0, 0, 0, 30, 20, 4, 15, 5},
+		.config_T22 = {7, 0, 0, 25, 0, -25, 255, 4, 50, 0, 1, 10, 15, 20, 25, 30, 4},
+		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T24 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T25 = {3, 0, 200, 50, 64, 31, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T27 = {0, 0, 0, 0, 0, 0, 0},
+		.config_T28 = {0, 0, 2, 4, 8, 60},
+		.object_crc = {0x19, 0x87, 0x7E},
+	},
+	{
+		.version = 0x014,
+		.abs_x_min = 13,
+		.abs_x_max = 1009,
+		.abs_y_min = 15,
+		.abs_y_max = 960,
+		.abs_pressure_min = 0,
+		.abs_pressure_max = 255,
+		.abs_width_min = 0,
+		.abs_width_max = 20,
+		.gpio_irq = INCREDIBLEC_GPIO_TP_INT_N,
+		.power = incrediblec_atmel_ts_power,
+		.config_T6 = {0, 0, 0, 0, 0, 0},
+		.config_T7 = {50, 15, 25},
+		.config_T8 = {12, 0, 20, 20, 0, 0, 10, 15},
+		.config_T9 = {3, 0, 0, 18, 12, 0, 48, 45, 2, 7, 0, 0, 0, 0, 2, 10, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 143, 47, 143, 81},
+		.config_T15 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T19 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T20 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T22 = {5, 0, 0, 25, 0, -25, 255, 4, 50, 0, 1, 10, 15, 20, 25, 30, 4},
+		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T24 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T25 = {3, 0, 200, 50, 64, 31, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T27 = {0, 0, 0, 0, 0, 0, 0},
+		.config_T28 = {0, 0, 2, 4, 8, 60},
+	}
+};
+
 static struct regulator_consumer_supply tps65023_dcdc1_supplies[] = {
 	{
 		.supply = "acpu_vcore",
@@ -803,8 +908,8 @@ static struct tpa6130_platform_data headset_amp_platform_data = {
 
 static struct i2c_board_info i2c_devices[] = {
 	{
-		I2C_BOARD_INFO(MXT224_DEV_NAME, 0x94 >> 1),
-		.platform_data = &mxt224_data,
+		I2C_BOARD_INFO(ATMEL_QT602240_NAME, 0x94 >> 1),
+		.platform_data = &incrediblec_atmel_ts_data,
 		.irq = MSM_GPIO_TO_INT(INCREDIBLEC_GPIO_TP_INT_N)
 	},
 	{
@@ -1300,7 +1405,7 @@ static ssize_t incrediblec_virtual_keys_show(struct kobject *kobj,
 
 static struct kobj_attribute incrediblec_virtual_keys_attr = {
 	.attr = {
-		.name = "virtualkeys.mxt224_ts_input",
+		.name = "virtualkeys.atmel-touchscreen",
 		.mode = S_IRUGO,
 	},
 	.show = &incrediblec_virtual_keys_show,
@@ -1394,10 +1499,12 @@ static void __init incrediblec_init(void)
 	if (!opt_usb_h2w_sw) {
 		msm_device_hsusb.dev.platform_data = &msm_hsusb_pdata;
 	}	
-	//if (system_rev > 2) 
-	//	incrediblec_mxt224_data[0].config_T9[7] = 33;
-
-	mxt224_init();
+	if (system_rev > 2) {
+		incrediblec_atmel_ts_data[0].config_T9[7] = 33;
+		incrediblec_atmel_ts_data[0].object_crc[0] = 0x2E;
+		incrediblec_atmel_ts_data[0].object_crc[1] = 0x80;
+		incrediblec_atmel_ts_data[0].object_crc[2] = 0xE0;
+	}
 	i2c_register_board_info(0, i2c_devices, ARRAY_SIZE(i2c_devices));
 
 	ret = incrediblec_init_mmc(system_rev);
